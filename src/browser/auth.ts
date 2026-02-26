@@ -569,51 +569,6 @@ export async function ensureAuthenticated(
   }
 }
 
-/** Timeout for waiting for MSAL to refresh tokens (ms). */
-const TOKEN_REFRESH_WAIT_TIMEOUT_MS = 20000;
-
-/** Interval for checking if tokens have been refreshed (ms). */
-const TOKEN_REFRESH_POLL_INTERVAL_MS = 1000;
-
-/**
- * Waits for MSAL to refresh tokens in the browser.
- * 
- * When the browser is "authenticated" (session cookies valid) but MSAL tokens
- * are expired, we need to wait for Teams JS to load and trigger silent token
- * acquisition. This polls localStorage until we see fresh tokens.
- * 
- * @returns true if tokens were refreshed, false if timeout
- */
-async function waitForTokenRefresh(
-  page: Page,
-  context: BrowserContext,
-  onProgress?: (message: string) => void,
-): Promise<boolean> {
-  const log = onProgress ?? ((msg: string) => logger.debug('auth', msg));
-  
-  log('Waiting for MSAL to refresh tokens...');
-  const startTime = Date.now();
-  
-  while (Date.now() - startTime < TOKEN_REFRESH_WAIT_TIMEOUT_MS) {
-    // Save current session state
-    await saveSessionState(context);
-    
-    // Check if we now have valid tokens
-    const token = extractSubstrateToken();
-    if (token && token.expiry.getTime() > Date.now()) {
-      const minsRemaining = Math.round((token.expiry.getTime() - Date.now()) / 60000);
-      log(`Token refresh detected (${minsRemaining} mins valid).`);
-      return true;
-    }
-    
-    // Wait and retry
-    await page.waitForTimeout(TOKEN_REFRESH_POLL_INTERVAL_MS);
-  }
-  
-  log('Token refresh timed out.');
-  return false;
-}
-
 /**
  * Forces a new login by clearing session and navigating to Teams.
  */
