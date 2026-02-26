@@ -223,14 +223,6 @@ function extractMsalCacheInfoWithDiagnostics(state: SessionState): MsalCacheExtr
   };
 }
 
-/**
- * Extracts MSAL cache info (refresh token, client ID, tenant ID) from session state.
- */
-function extractMsalCacheInfo(state: SessionState): MsalCacheInfo | null {
-  const result = extractMsalCacheInfoWithDiagnostics(state);
-  return result.success ? result.cacheInfo! : null;
-}
-
 // ============================================================================
 // OAuth2 Token Refresh
 // ============================================================================
