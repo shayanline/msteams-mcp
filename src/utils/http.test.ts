@@ -215,7 +215,7 @@ describe('httpRequest', () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response('Rate Limited', {
         status: 429,
-        headers: { 'Retry-After': '1' },
+        headers: { 'Retry-After': '60' },
       })
     );
 
