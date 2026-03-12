@@ -175,8 +175,8 @@ describe('logger', () => {
       expect(consoleSpy.debug).toHaveBeenCalled();
     });
 
-    it('defaults to info for unknown level', () => {
-      // Set an invalid level via env (simulated by calling with valid level first)
+    it('logs info level when set to info', () => {
+      // Set info level
       setLogLevel('info');
       
       info('c', 'test');
