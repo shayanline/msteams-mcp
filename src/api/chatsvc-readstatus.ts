@@ -280,6 +280,7 @@ export async function getUnreadConversations(): Promise<Result<UnreadConversatio
     }
 
     const readUpTo = parseInt(horizon.split(';')[0], 10);
+    if (isNaN(readUpTo)) continue; // malformed horizon — skip rather than misclassify
     if (lastMsgTime <= readUpTo) continue; // Already read
 
     // For channels, preserve original behavior (skip if last msg is ours).
