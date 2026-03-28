@@ -286,7 +286,10 @@ export async function getUnreadConversations(): Promise<Result<UnreadConversatio
     // For channels, preserve original behavior (skip if last msg is ours).
     // For chats, only skip if read horizon is within 2s of our reply —
     // a larger gap means unread messages exist before our reply.
-    if (fromMe && (isChannel || (lastMsgTime - readUpTo) < 2000)) continue;
+    // 2-second (2000 ms) window: if the read horizon is this close to our last message,
+    // assume we've read everything and there's no unread gap before our reply.
+    const SELF_REPLY_READ_WINDOW_MS = 2000;
+    if (fromMe && (isChannel || (lastMsgTime - readUpTo) < SELF_REPLY_READ_WINDOW_MS)) continue;
 
     const entry: UnreadConversation = {
       conversationId: c.id as string,
