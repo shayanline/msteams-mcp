@@ -9,7 +9,6 @@
 | Activity feed pagination | `teams_get_activity` accepts `syncState` to fetch only newer items incrementally |
 | Thread `since` filter | `teams_get_thread` accepts `since` (ISO 8601) to fetch only messages after a timestamp |
 | Recording/transcript links | Messages with recording/transcript `<item>` tags now include URIs in `links` |
-| Chrome SSO cookie import | Visible logins import Microsoft SSO cookies from Chrome, reducing manual credential entry |
 | Silent `forceNew` login | `teams_login forceNew:true` tries headless SSO before showing visible browser |
 
 ## Pending
