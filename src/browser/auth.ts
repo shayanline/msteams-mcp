@@ -371,9 +371,14 @@ export async function waitForManualLogin(
         await showLoginProgress(page, 'saving');
       }
 
-      // The persistent browser profile already has MSAL tokens in localStorage
-      // from the login flow. Just save the session state directly.
-      await saveSessionState(context);
+      // Wait for MSAL to store tokens in localStorage before saving session.
+      // After a fresh interactive login, Teams UI can appear before token
+      // acquisition completes — polling ensures tokens are captured.
+      const tokensReady = await waitForTokenRefresh(page, context, onProgress);
+      if (!tokensReady) {
+        // Tokens didn't appear within timeout — save whatever state we have
+        await saveSessionState(context);
+      }
       log('Session state saved.');
 
       if (showOverlay) {
