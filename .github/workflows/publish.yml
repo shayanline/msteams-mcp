@@ -1,0 +1,56 @@
+name: Publish to npm
+
+# Uses npm Trusted Publishing (OIDC) — no NPM_TOKEN secret required.
+#
+# One-time setup on npmjs.com (the package already exists from the first manual publish):
+#   npmjs.com -> @shayanline/msteams-mcp -> Settings -> Trusted Publisher -> GitHub Actions
+#     Organization or user: shayanline
+#     Repository:           msteams-mcp
+#     Workflow filename:    publish.yml
+#
+# The publishable package lives on the `published` branch (the fork's `main`
+# tracks upstream and is NOT publishable). This workflow only ever runs from
+# `published`: push a version tag cut from that branch to release, e.g.
+#   git checkout published && npm version patch && git push --follow-tags
+# or trigger it manually with "Run workflow" against the `published` branch.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for OIDC trusted publishing + provenance
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # Node 24 ships npm >= 11.5.1, the minimum that supports trusted publishing.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # No NODE_AUTH_TOKEN: the npm CLI mints a short-lived token from the GitHub
+      # OIDC identity and emits provenance automatically.
+      - name: Publish to npm
+        run: npm publish --access public
