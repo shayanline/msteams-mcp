@@ -1,10 +1,11 @@
 # Teams MCP Server
 
-[![CI](https://github.com/m0nkmaster/msteams-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/m0nkmaster/msteams-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
 
 An MCP (Model Context Protocol) server that enables AI assistants to interact with Microsoft Teams. Search messages, send replies, manage favourites, and more.
+
+> **Fork notice.** This is an enhanced fork of [`m0nkmaster/msteams-mcp`](https://github.com/m0nkmaster/msteams-mcp) by Rob MacDonald (MIT), published as [`@shayanline/msteams-mcp`](https://www.npmjs.com/package/@shayanline/msteams-mcp). It stays in sync with upstream and adds extra tools and fixes, which are also contributed back upstream as pull requests. All credit for the original project goes to the upstream author; if these changes land upstream you can switch back to the original package.
 
 ## How It Works
 
@@ -35,7 +36,7 @@ Add to your MCP client configuration (e.g., Claude Desktop, Windsurf, Cursor):
   "mcpServers": {
     "teams": {
       "command": "npx",
-      "args": ["-y", "msteams-mcp@latest"]
+      "args": ["-y", "@shayanline/msteams-mcp@latest"]
     }
   }
 }

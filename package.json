@@ -1,7 +1,7 @@
 {
-  "name": "msteams-mcp",
-  "version": "0.23.1",
-  "description": "MCP server for Microsoft Teams - search messages, send replies, manage favourites",
+  "name": "@shayanline/msteams-mcp",
+  "version": "0.24.0",
+  "description": "MCP server for Microsoft Teams (search, send, reply, calendar, presence). Enhanced fork of m0nkmaster/msteams-mcp.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -11,19 +11,23 @@
     "dist",
     "README.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/m0nkmaster/msteams-mcp.git"
+    "url": "git+https://github.com/shayanline/msteams-mcp.git"
   },
-  "homepage": "https://github.com/m0nkmaster/msteams-mcp#readme",
+  "homepage": "https://github.com/shayanline/msteams-mcp#readme",
   "bugs": {
-    "url": "https://github.com/m0nkmaster/msteams-mcp/issues"
+    "url": "https://github.com/shayanline/msteams-mcp/issues"
   },
   "engines": {
     "node": ">=18"
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "npm run build",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "research": "tsx src/research/explore.ts",
@@ -40,10 +44,15 @@
   "keywords": [
     "mcp",
     "microsoft-teams",
+    "teams",
+    "model-context-protocol",
     "playwright",
     "browser-automation"
   ],
-  "author": "Rob MacDonald",
+  "author": "Shayan Khaksar",
+  "contributors": [
+    "Rob MacDonald (original author of m0nkmaster/msteams-mcp)"
+  ],
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
