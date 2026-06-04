@@ -313,3 +313,122 @@ export async function getUnreadConversations(): Promise<Result<UnreadConversatio
     totalChecked: convs.length,
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// List conversations (browse recent chats and channels)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A recent conversation entry. */
+export interface ConversationSummary {
+  conversationId: string;
+  displayName?: string;
+  type: 'chat' | 'channel' | 'meeting';
+  isFavorite: boolean;
+  lastMessagePreview?: string;
+  lastMessageFrom?: string;
+  lastMessageTime?: number;
+  isUnread: boolean;
+}
+
+/** Result of listing conversations. */
+export interface ListConversationsResult {
+  conversations: ConversationSummary[];
+  total: number;
+}
+
+/**
+ * Lists the user's recent conversations (chats, channels, meetings) with topic,
+ * type, favourite flag, and last message preview. Single API call.
+ */
+export async function listConversations(
+  options: { limit?: number; type?: 'chat' | 'channel' | 'meeting' } = {}
+): Promise<Result<ListConversationsResult>> {
+  const authResult = requireMessageAuthWithConfig();
+  if (!authResult.ok) return authResult;
+  const { auth, region, baseUrl } = authResult.value;
+
+  const response = await httpRequest<Record<string, unknown>>(
+    CHATSVC_API.conversations(region, baseUrl),
+    { method: 'GET', headers: getSkypeAuthHeaders(auth.skypeToken, auth.authToken, baseUrl) }
+  );
+  if (!response.ok) return response;
+
+  const data = response.value.data as Record<string, unknown> | undefined;
+  const convs = (data?.conversations as unknown[]) || [];
+  const out: ConversationSummary[] = [];
+
+  for (const raw of convs) {
+    const c = raw as Record<string, unknown>;
+    const id = c.id as string;
+    if (!id) continue;
+    const props = (c.properties || {}) as Record<string, string>;
+    const tp = (c.threadProperties || {}) as Record<string, string>;
+    const lastMsg = c.lastMessage as Record<string, string> | undefined;
+
+    const isChannel = tp.threadType === 'channel' || id.includes('@thread.tacv2');
+    const isMeeting = (tp.threadType === 'meeting') || id.includes('@thread.v2') && tp.spaceThreadTopic?.toLowerCase?.().includes('meeting');
+    const type: ConversationSummary['type'] = isChannel ? 'channel' : (isMeeting ? 'meeting' : 'chat');
+
+    const lastMsgTime = lastMsg?.id ? parseInt(lastMsg.id, 10) : undefined;
+    const horizon = props.consumptionhorizon;
+    const readUpTo = horizon ? parseInt(horizon.split(';')[0], 10) : 0;
+    const isUnread = !!(lastMsgTime && lastMsgTime > readUpTo && !lastMsg?.from?.includes(auth.userMri));
+
+    out.push({
+      conversationId: id,
+      displayName: tp.topic || tp.spaceThreadTopic || lastMsg?.imdisplayname,
+      type,
+      isFavorite: props.favorite === 'true',
+      lastMessagePreview: lastMsg?.content ? lastMsg.content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140) : undefined,
+      lastMessageFrom: lastMsg?.imdisplayname,
+      lastMessageTime: lastMsgTime && !isNaN(lastMsgTime) ? lastMsgTime : undefined,
+      isUnread,
+    });
+  }
+
+  const filtered = options.type ? out.filter(c => c.type === options.type) : out;
+  filtered.sort((a, b) => (b.lastMessageTime ?? 0) - (a.lastMessageTime ?? 0));
+  const limited = options.limit ? filtered.slice(0, options.limit) : filtered;
+
+  return ok({ conversations: limited, total: filtered.length });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mark unread
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Marks a conversation as unread from a given message onward, by moving the
+ * read horizon to just before that message. Pass the message you want to be the
+ * first unread one.
+ */
+export async function markUnread(
+  conversationId: string,
+  messageId: string
+): Promise<Result<MarkAsReadResult>> {
+  const authResult = requireMessageAuthWithConfig();
+  if (!authResult.ok) return authResult;
+  const { auth, region, baseUrl } = authResult.value;
+
+  // Set the horizon to one millisecond before the target message so it (and
+  // everything after) reads as unread. Message IDs are millisecond timestamps.
+  let before = messageId;
+  try {
+    before = (BigInt(messageId) - 1n).toString();
+  } catch {
+    // non-numeric id, fall back to the id itself
+  }
+  const consumptionHorizon = `${before};${before};${before}`;
+
+  const response = await httpRequest<unknown>(
+    CHATSVC_API.updateConsumptionHorizon(region, conversationId, baseUrl),
+    {
+      method: 'PUT',
+      headers: getSkypeAuthHeaders(auth.skypeToken, auth.authToken, baseUrl),
+      body: JSON.stringify({ consumptionhorizon: consumptionHorizon }),
+    }
+  );
+  if (!response.ok) return response;
+
+  return ok({ conversationId, markedUpTo: before });
+}

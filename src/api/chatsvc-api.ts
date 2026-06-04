@@ -19,4 +19,5 @@ export * from './chatsvc-activity.js';
 export * from './chatsvc-reactions.js';
 export * from './chatsvc-virtual.js';
 export * from './chatsvc-readstatus.js';
+export * from './chatsvc-conversations.js';
 export * from './chatsvc-common.js';

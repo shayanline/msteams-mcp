@@ -5,7 +5,7 @@
 
 An MCP (Model Context Protocol) server that enables AI assistants to interact with Microsoft Teams. Search messages, send replies, manage favourites, and more.
 
-> **Fork notice.** This is an enhanced fork of [`m0nkmaster/msteams-mcp`](https://github.com/m0nkmaster/msteams-mcp) by Rob MacDonald (MIT), published as [`@shayanline/msteams-mcp`](https://www.npmjs.com/package/@shayanline/msteams-mcp). It stays in sync with upstream and adds extra tools and fixes, which are also contributed back upstream as pull requests. All credit for the original project goes to the upstream author; if these changes land upstream you can switch back to the original package.
+> **Fork notice.** This project began as a fork of [`m0nkmaster/msteams-mcp`](https://github.com/m0nkmaster/msteams-mcp) by Rob MacDonald (MIT), and is now maintained and released independently as [`@shayanline/msteams-mcp`](https://www.npmjs.com/package/@shayanline/msteams-mcp) with a substantially expanded tool set (chat management, files, tasks, scheduling, pin/mute, and more). Sincere thanks to the original author for the foundation the project is built on.
 
 ## How It Works
 
@@ -86,9 +86,10 @@ The server uses your system's Chrome (macOS/Linux) or Edge (Windows) for authent
 
 | Tool | Description |
 |------|-------------|
-| `teams_send_message` | Send a message (default: self-chat/notes). Use `replyToMessageId` for thread replies |
+| `teams_send_message` | Send a message (default: self-chat/notes). Use `replyToMessageId` for thread replies, `importance` (high/urgent) for priority, `subject` for a channel post title |
 | `teams_edit_message` | Edit one of your own messages |
 | `teams_delete_message` | Delete one of your own messages (soft delete) |
+| `teams_forward_message` | Forward a message to another conversation as a quoted block, with an optional note |
 
 ### People & Contacts
 
@@ -114,6 +115,23 @@ The server uses your system's Chrome (macOS/Linux) or Edge (Windows) for authent
 | `teams_get_followed_threads` | Get list of followed threads with source references |
 | `teams_get_unread` | Get unread counts (aggregate or per-conversation) |
 | `teams_mark_read` | Mark a conversation as read up to a message |
+| `teams_mark_unread` | Mark a conversation unread from a chosen message onward |
+| `teams_list_chats` | Browse recent conversations (chats, group chats, channels, meetings) with topic, type, favourite, unread, last message |
+| `teams_list_teams` | List all teams you belong to, each with its channels |
+
+### Chat management
+
+| Tool | Description |
+|------|-------------|
+| `teams_get_chat_members` | List the members of a group chat or channel (MRI and role) |
+| `teams_rename_chat` | Rename a group chat (set its topic) |
+| `teams_add_member` | Add a person to a group chat |
+| `teams_remove_member` | Remove a person from a group chat |
+| `teams_leave_chat` | Leave a group chat |
+| `teams_pin_message` | Pin a message in a conversation |
+| `teams_unpin_message` | Clear pinned messages in a conversation |
+| `teams_mute_chat` | Mute a conversation (notifications off) |
+| `teams_unmute_chat` | Unmute a conversation |
 
 ### Reactions
 
@@ -136,6 +154,7 @@ The server uses your system's Chrome (macOS/Linux) or Edge (Windows) for authent
 | `teams_cancel_meeting` | Cancel an event (organiser notifies attendees; attendee removes from own calendar) |
 | `teams_respond_to_meeting` | Accept, tentatively accept, or decline a meeting invite |
 | `teams_get_schedule` | Check free/busy availability for one or more people over a time window |
+| `teams_find_meeting_times` | Suggest meeting slots that work across attendees (ranked by confidence) |
 | `teams_get_transcript` | Get meeting transcript (requires `threadId` from `teams_get_meetings`) |
 
 `teams_get_meetings` returns: subject, times, organiser, join URL, `threadId` for meeting chat. Use `threadId` with `teams_get_thread` to read meeting chat, or with `teams_get_transcript` to get the full transcript with speakers and timestamps.
@@ -145,8 +164,21 @@ The server uses your system's Chrome (macOS/Linux) or Edge (Windows) for authent
 | Tool | Description |
 |------|-------------|
 | `teams_get_shared_files` | Get files and links shared in a conversation (supports pagination) |
+| `teams_list_files` | Browse files and folders in your OneDrive |
+| `teams_upload_file` | Upload a local file to your OneDrive (up to 250 MB) |
+| `teams_download_file` | Download a OneDrive file by item id to a local path |
+| `teams_send_file` | Send a local file into a conversation (uploads to OneDrive, shares it, posts the file) |
 
-Returns both files (name, extension, URL, size) and links (URL, title), along with who shared each item. Works for channels, group chats, 1:1 chats, and meeting chats.
+`teams_get_shared_files` returns both files (name, extension, URL, size) and links (URL, title), along with who shared each item. Works for channels, group chats, 1:1 chats, and meeting chats. `teams_send_file` uploads the file then posts a share link that Teams renders as a file card.
+
+### Tasks (Microsoft To Do)
+
+| Tool | Description |
+|------|-------------|
+| `teams_list_task_lists` | List your To Do task lists |
+| `teams_list_tasks` | List tasks in a list (defaults to the default list, open tasks only) |
+| `teams_create_task` | Create a task (title, optional due date, note, importance) |
+| `teams_complete_task` | Mark a task complete or reopen it |
 
 ### Session
 

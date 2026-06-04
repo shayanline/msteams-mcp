@@ -115,6 +115,22 @@ export const CHATSVC_API = {
   /** List all recent conversations with inline properties. */
   conversations: (region: string, baseUrl = DEFAULT_TEAMS_BASE_URL) =>
     `${baseUrl}/api/chatsvc/${region}/v1/users/ME/conversations?view=msnp24Equivalent&pageSize=200`,
+
+  /** Members of a thread (group chat / channel). */
+  threadMembers: (region: string, threadId: string, baseUrl = DEFAULT_TEAMS_BASE_URL) =>
+    `${baseUrl}/api/chatsvc/${region}/v1/threads/${encodeURIComponent(threadId)}/members`,
+
+  /** A single member of a thread (PUT to add, DELETE to remove). */
+  threadMember: (region: string, threadId: string, memberMri: string, baseUrl = DEFAULT_TEAMS_BASE_URL) =>
+    `${baseUrl}/api/chatsvc/${region}/v1/threads/${encodeURIComponent(threadId)}/members/${encodeURIComponent(memberMri)}`,
+
+  /** A thread-level property (e.g. topic, pinnedItems), PUT to set. */
+  threadProperty: (region: string, threadId: string, name: string, baseUrl = DEFAULT_TEAMS_BASE_URL) =>
+    `${baseUrl}/api/chatsvc/${region}/v1/threads/${encodeURIComponent(threadId)}/properties?name=${encodeURIComponent(name)}`,
+
+  /** A per-user conversation property (e.g. alerts for mute), PUT to set. */
+  conversationProperty: (region: string, conversationId: string, name: string, baseUrl = DEFAULT_TEAMS_BASE_URL) =>
+    `${baseUrl}/api/chatsvc/${region}/v1/users/ME/conversations/${encodeURIComponent(conversationId)}/properties?name=${encodeURIComponent(name)}`,
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -178,6 +194,9 @@ export const GRAPH_CALENDAR_API = {
 
   /** Get free/busy schedule for one or more users (POST). */
   getSchedule: () => `${GRAPH_BASE_URL}/me/calendar/getSchedule`,
+
+  /** Suggest meeting times across attendees based on free/busy (POST). */
+  findMeetingTimes: () => `${GRAPH_BASE_URL}/me/findMeetingTimes`,
 } as const;
 
 /** Headers for Microsoft Graph API calls. */

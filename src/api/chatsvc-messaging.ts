@@ -120,6 +120,19 @@ export interface SendMessageOptions {
    * the top of the message and posted normally.
    */
   replyToMessageId?: string;
+  /**
+   * Message priority. "high" flags the message as important, "urgent" sends a
+   * priority notification that repeats until read. Defaults to normal.
+   */
+  importance?: 'normal' | 'high' | 'urgent';
+  /** Optional subject/title. Mainly used for channel posts (the bold heading). */
+  subject?: string;
+  /**
+   * Pre-built HTML body. When set, it is sent as-is and the markdown/mention
+   * pipeline is skipped. Used internally for forwarding (the caller is
+   * responsible for escaping any user text). Most callers should use `content`.
+   */
+  rawContentHtml?: string;
 }
 
 /** Result of getting a 1:1 conversation. */
@@ -167,7 +180,7 @@ export async function sendMessage(
   }
   const { auth, region, baseUrl } = authResult.value;
 
-  const { replyToMessageId } = options;
+  const { replyToMessageId, importance, subject } = options;
   const displayName = getUserDisplayName() || 'User';
 
   const clientMessageId = Date.now().toString();
@@ -175,9 +188,16 @@ export async function sendMessage(
   // Process content: handle mentions, links, and markdown formatting.
   // Always convert through markdown→HTML pipeline (never pass user content through
   // without sanitization, as Teams requires proper block-level wrapping like <p> tags)
-  const parsed = parseContentWithMentionsAndLinks(content);
-  let htmlContent = parsed.html;
-  const mentionsToSend = parsed.mentions;
+  let htmlContent: string;
+  let mentionsToSend: Mention[];
+  if (options.rawContentHtml !== undefined) {
+    htmlContent = options.rawContentHtml;
+    mentionsToSend = [];
+  } else {
+    const parsed = parseContentWithMentionsAndLinks(content);
+    htmlContent = parsed.html;
+    mentionsToSend = parsed.mentions;
+  }
 
   // Reply handling. Channels support native reply chains via the URL. Chats
   // (1:1, group, meeting) reject reply chains ("Reply chains is not allowed in
@@ -202,11 +222,21 @@ export async function sendMessage(
     clientmessageid: clientMessageId,
   };
 
-  // Add mentions property if mentions were found
+  // Collect message properties (mentions, importance) into one object.
+  const properties: Record<string, unknown> = {};
   if (mentionsToSend.length > 0) {
-    body.properties = {
-      mentions: buildMentionsProperty(mentionsToSend),
-    };
+    properties.mentions = buildMentionsProperty(mentionsToSend);
+  }
+  if (importance && importance !== 'normal') {
+    properties.importance = importance;
+  }
+  if (Object.keys(properties).length > 0) {
+    body.properties = properties;
+  }
+
+  // A subject becomes the bold heading on a channel post.
+  if (subject) {
+    body.subject = subject;
   }
 
   const url = CHATSVC_API.messages(region, conversationId, threadReplyId, baseUrl);
