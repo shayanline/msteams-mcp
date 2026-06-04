@@ -735,3 +735,96 @@ export async function getSchedule(
 
   return ok({ schedules });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Find meeting times
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Options for finding meeting times across attendees. */
+export interface FindMeetingTimesOptions {
+  /** Attendee email addresses. */
+  attendees: string[];
+  /** Meeting length in minutes (default 30). */
+  durationMinutes?: number;
+  /** ISO start of the window to consider (default now). */
+  start?: string;
+  /** ISO end of the window to consider (default 5 days out). */
+  end?: string;
+  /** Max suggestions to return (default 5). */
+  maxCandidates?: number;
+}
+
+/** A suggested meeting slot. */
+export interface MeetingTimeSuggestion {
+  start: string;
+  end: string;
+  confidence?: number;
+  organizerAvailability?: string;
+  attendeeAvailability?: Array<{ email: string; availability: string }>;
+}
+
+/** Result from findMeetingTimes. */
+export interface FindMeetingTimesResult {
+  suggestions: MeetingTimeSuggestion[];
+  emptyReason?: string;
+}
+
+/**
+ * Suggests meeting time slots that work across attendees, based on free/busy.
+ * Uses the Graph findMeetingTimes action with the calendar token.
+ */
+export async function findMeetingTimes(
+  options: FindMeetingTimesOptions
+): Promise<Result<FindMeetingTimesResult>> {
+  const authResult = requireGraphAuth();
+  if (!authResult.ok) return authResult;
+  const graphToken = authResult.value;
+
+  const now = new Date();
+  const start = options.start ?? now.toISOString();
+  const end = options.end ?? new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000).toISOString();
+  const minutes = options.durationMinutes ?? 30;
+
+  const body = {
+    attendees: options.attendees.map((address) => ({
+      type: 'required',
+      emailAddress: { address },
+    })),
+    timeConstraint: {
+      timeslots: [{ start: { dateTime: start, timeZone: 'UTC' }, end: { dateTime: end, timeZone: 'UTC' } }],
+    },
+    meetingDuration: `PT${minutes}M`,
+    maxCandidates: options.maxCandidates ?? 5,
+  };
+
+  const response = await httpRequest<Record<string, unknown>>(
+    GRAPH_CALENDAR_API.findMeetingTimes(),
+    {
+      method: 'POST',
+      headers: getGraphHeaders(graphToken),
+      body: JSON.stringify(body),
+    }
+  );
+
+  if (!response.ok) return response;
+
+  const data = response.value.data as Record<string, unknown>;
+  const raw = (data.meetingTimeSuggestions ?? []) as Array<Record<string, unknown>>;
+
+  const suggestions: MeetingTimeSuggestion[] = raw.map((s) => {
+    const slot = (s.meetingTimeSlot ?? {}) as Record<string, { dateTime?: string }>;
+    const attendees = (s.attendeeAvailability ?? []) as Array<Record<string, unknown>>;
+    return {
+      start: slot.start?.dateTime ?? '',
+      end: slot.end?.dateTime ?? '',
+      confidence: s.confidence as number | undefined,
+      organizerAvailability: s.organizerAvailability as string | undefined,
+      attendeeAvailability: attendees.map((a) => ({
+        email: ((a.attendee as Record<string, Record<string, string>>)?.emailAddress?.address) ?? '',
+        availability: (a.availability as string) ?? 'unknown',
+      })),
+    };
+  });
+
+  return ok({ suggestions, emptyReason: (data.emptySuggestionsReason as string) || undefined });
+}

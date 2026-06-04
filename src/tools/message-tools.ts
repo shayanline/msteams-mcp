@@ -22,8 +22,19 @@ import {
   removeReaction,
   getSavedMessages,
   getFollowedThreads,
+  listConversations,
+  markUnread,
+  getChatMembers,
+  addMember,
+  removeMember,
+  leaveChat,
+  renameChat,
+  forwardMessage,
+  pinMessage,
+  unpinMessage,
+  setMuted,
 } from '../api/chatsvc-api.js';
-import { getFavorites, addFavorite, removeFavorite, getCustomEmojis } from '../api/csa-api.js';
+import { getFavorites, addFavorite, removeFavorite, getCustomEmojis, getMyTeamsAndChannels } from '../api/csa-api.js';
 import { SELF_CHAT_ID, MAX_THREAD_LIMIT, STANDARD_EMOJIS } from '../constants.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -34,6 +45,8 @@ export const SendMessageInputSchema = z.object({
   content: z.string().min(1, 'Message content cannot be empty'),
   conversationId: z.string().optional().default(SELF_CHAT_ID),
   replyToMessageId: z.string().optional(),
+  importance: z.enum(['normal', 'high', 'urgent']).optional(),
+  subject: z.string().optional(),
 });
 
 export const FavoriteInputSchema = z.object({
@@ -109,6 +122,62 @@ export const GetMessageInputSchema = z.object({
   messageId: z.string().min(1, 'Message ID cannot be empty'),
 });
 
+export const ListChatsInputSchema = z.object({
+  limit: z.number().min(1).max(200).optional().default(50),
+  type: z.enum(['chat', 'channel', 'meeting']).optional(),
+});
+
+export const MarkUnreadInputSchema = z.object({
+  conversationId: z.string().min(1, 'Conversation ID cannot be empty'),
+  messageId: z.string().min(1, 'Message ID cannot be empty'),
+});
+
+export const ListTeamsInputSchema = z.object({});
+
+export const GetChatMembersInputSchema = z.object({
+  conversationId: z.string().min(1, 'Conversation ID cannot be empty'),
+});
+
+export const AddMemberInputSchema = z.object({
+  conversationId: z.string().min(1, 'Conversation ID cannot be empty'),
+  userId: z.string().min(1, 'User ID cannot be empty'),
+  role: z.enum(['Admin', 'User']).optional().default('User'),
+});
+
+export const RemoveMemberInputSchema = z.object({
+  conversationId: z.string().min(1, 'Conversation ID cannot be empty'),
+  userId: z.string().min(1, 'User ID cannot be empty'),
+});
+
+export const LeaveChatInputSchema = z.object({
+  conversationId: z.string().min(1, 'Conversation ID cannot be empty'),
+});
+
+export const RenameChatInputSchema = z.object({
+  conversationId: z.string().min(1, 'Conversation ID cannot be empty'),
+  topic: z.string().min(1, 'Topic cannot be empty'),
+});
+
+export const ForwardMessageInputSchema = z.object({
+  sourceConversationId: z.string().min(1, 'Source conversation ID cannot be empty'),
+  messageId: z.string().min(1, 'Message ID cannot be empty'),
+  targetConversationId: z.string().min(1, 'Target conversation ID cannot be empty'),
+  comment: z.string().optional(),
+});
+
+export const PinMessageInputSchema = z.object({
+  conversationId: z.string().min(1, 'Conversation ID cannot be empty'),
+  messageId: z.string().min(1, 'Message ID cannot be empty'),
+});
+
+export const UnpinMessageInputSchema = z.object({
+  conversationId: z.string().min(1, 'Conversation ID cannot be empty'),
+});
+
+export const MuteChatInputSchema = z.object({
+  conversationId: z.string().min(1, 'Conversation ID cannot be empty'),
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tool Definitions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,6 +199,15 @@ const sendMessageToolDefinition: Tool = {
       replyToMessageId: {
         type: 'string',
         description: 'For channel thread replies: the message ID of the thread root. Use serverMessageId from teams_send_message, id from teams_get_thread, or messageId from teams_search.',
+      },
+      importance: {
+        type: 'string',
+        enum: ['normal', 'high', 'urgent'],
+        description: 'Message priority. "high" marks it important, "urgent" sends a priority notification that repeats until read. Defaults to normal. Use urgent sparingly.',
+      },
+      subject: {
+        type: 'string',
+        description: 'Optional subject/title. Shown as the bold heading on a channel post. Ignored for ordinary chats.',
       },
     },
     required: ['content'],
@@ -458,6 +536,181 @@ const getMessageToolDefinition: Tool = {
   },
 };
 
+const listChatsToolDefinition: Tool = {
+  name: 'teams_list_chats',
+  description: 'List the user\'s recent conversations (chats, group chats, channels, meetings) with display name/topic, type, favourite flag, last message preview and unread state. Use this to browse or find a conversation when you do not already have its ID. Optionally filter by type.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      limit: {
+        type: 'number',
+        description: 'Maximum conversations to return, most recent first (default 50, max 200).',
+      },
+      type: {
+        type: 'string',
+        enum: ['chat', 'channel', 'meeting'],
+        description: 'Optional filter to only chats, only channels, or only meetings.',
+      },
+    },
+  },
+};
+
+const markUnreadToolDefinition: Tool = {
+  name: 'teams_mark_unread',
+  description: 'Mark a conversation as unread from a specific message onward. Pass the message you want to become the first unread one. This moves the read marker back to just before that message.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      conversationId: {
+        type: 'string',
+        description: 'The conversation ID to mark unread.',
+      },
+      messageId: {
+        type: 'string',
+        description: 'The message ID that should become the first unread message (everything from here onward shows unread).',
+      },
+    },
+    required: ['conversationId', 'messageId'],
+  },
+};
+
+const listTeamsToolDefinition: Tool = {
+  name: 'teams_list_teams',
+  description: 'List all teams the user is a member of, each with its channels (id and name). Use this to browse teams and channels, or to get a channel\'s conversation ID for sending messages.',
+  inputSchema: {
+    type: 'object',
+    properties: {},
+  },
+};
+
+const getChatMembersToolDefinition: Tool = {
+  name: 'teams_get_chat_members',
+  description: 'List the members of a group chat or channel thread, with each member\'s MRI and role (Admin or User). Use teams_search_people to resolve an MRI to a name if needed.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      conversationId: { type: 'string', description: 'The group chat or channel conversation ID.' },
+    },
+    required: ['conversationId'],
+  },
+};
+
+const addMemberToolDefinition: Tool = {
+  name: 'teams_add_member',
+  description: 'Add a person to a group chat. Confirm with the user before adding people. Works on group chats (not 1:1). Get the user identifier from teams_search_people.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      conversationId: { type: 'string', description: 'The group chat conversation ID.' },
+      userId: { type: 'string', description: 'The person to add: MRI (8:orgid:guid), guid@tenant, or raw GUID (from teams_search_people).' },
+      role: { type: 'string', enum: ['Admin', 'User'], description: 'Role to grant (default User).' },
+    },
+    required: ['conversationId', 'userId'],
+  },
+};
+
+const removeMemberToolDefinition: Tool = {
+  name: 'teams_remove_member',
+  description: 'Remove a person from a group chat. This is destructive: confirm with the user first. To remove yourself, use teams_leave_chat instead.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      conversationId: { type: 'string', description: 'The group chat conversation ID.' },
+      userId: { type: 'string', description: 'The person to remove: MRI, guid@tenant, or raw GUID.' },
+    },
+    required: ['conversationId', 'userId'],
+  },
+};
+
+const leaveChatToolDefinition: Tool = {
+  name: 'teams_leave_chat',
+  description: 'Leave a group chat (removes you from it). Confirm with the user before leaving.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      conversationId: { type: 'string', description: 'The group chat conversation ID to leave.' },
+    },
+    required: ['conversationId'],
+  },
+};
+
+const renameChatToolDefinition: Tool = {
+  name: 'teams_rename_chat',
+  description: 'Rename a group chat (set its topic/title). Applies to group chats, not 1:1 chats.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      conversationId: { type: 'string', description: 'The group chat conversation ID.' },
+      topic: { type: 'string', description: 'The new chat name/topic.' },
+    },
+    required: ['conversationId', 'topic'],
+  },
+};
+
+const forwardMessageToolDefinition: Tool = {
+  name: 'teams_forward_message',
+  description: 'Forward a message to another conversation. The original is re-posted as a quoted "Forwarded message" block in the target, with an optional note above it. Get the source IDs from teams_search or teams_get_thread.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      sourceConversationId: { type: 'string', description: 'Conversation ID the original message is in.' },
+      messageId: { type: 'string', description: 'The message ID to forward (serverMessageId / id / messageId).' },
+      targetConversationId: { type: 'string', description: 'Conversation ID to forward the message to.' },
+      comment: { type: 'string', description: 'Optional note to add above the forwarded message.' },
+    },
+    required: ['sourceConversationId', 'messageId', 'targetConversationId'],
+  },
+};
+
+const pinMessageToolDefinition: Tool = {
+  name: 'teams_pin_message',
+  description: 'Pin a message in a conversation so it shows in the chat\'s pinned items. Get the messageId from teams_get_thread or teams_search (use the serverMessageId / id).',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      conversationId: { type: 'string', description: 'The conversation containing the message.' },
+      messageId: { type: 'string', description: 'The message id to pin.' },
+    },
+    required: ['conversationId', 'messageId'],
+  },
+};
+
+const unpinMessageToolDefinition: Tool = {
+  name: 'teams_unpin_message',
+  description: 'Remove the pinned message(s) from a conversation.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      conversationId: { type: 'string', description: 'The conversation to clear pinned messages from.' },
+    },
+    required: ['conversationId'],
+  },
+};
+
+const muteChatToolDefinition: Tool = {
+  name: 'teams_mute_chat',
+  description: 'Mute a conversation (turns off notifications/alerts for you). Use teams_unmute_chat to re-enable.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      conversationId: { type: 'string', description: 'The conversation to mute.' },
+    },
+    required: ['conversationId'],
+  },
+};
+
+const unmuteChatToolDefinition: Tool = {
+  name: 'teams_unmute_chat',
+  description: 'Unmute a conversation (turns notifications/alerts back on for you).',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      conversationId: { type: 'string', description: 'The conversation to unmute.' },
+    },
+    required: ['conversationId'],
+  },
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Handlers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -468,6 +721,8 @@ async function handleSendMessage(
 ): Promise<ToolResult> {
   const result = await sendMessage(input.conversationId, input.content, {
     replyToMessageId: input.replyToMessageId,
+    importance: input.importance,
+    subject: input.subject,
   });
 
   if (!result.ok) {
@@ -962,6 +1217,134 @@ async function handleGetMessage(
   };
 }
 
+async function handleListChats(
+  input: z.infer<typeof ListChatsInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  const result = await listConversations({ limit: input.limit, type: input.type });
+  if (!result.ok) {
+    return { success: false, error: result.error };
+  }
+  return { success: true, data: { conversations: result.value.conversations, total: result.value.total } };
+}
+
+async function handleMarkUnread(
+  input: z.infer<typeof MarkUnreadInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  const result = await markUnread(input.conversationId, input.messageId);
+  if (!result.ok) {
+    return { success: false, error: result.error };
+  }
+  return { success: true, data: { ...result.value, message: 'Conversation marked unread.' } };
+}
+
+async function handleListTeams(
+  _input: z.infer<typeof ListTeamsInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  const result = await getMyTeamsAndChannels();
+  if (!result.ok) {
+    return { success: false, error: result.error };
+  }
+  return { success: true, data: { count: result.value.teams.length, teams: result.value.teams } };
+}
+
+async function handleGetChatMembers(
+  input: z.infer<typeof GetChatMembersInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  const result = await getChatMembers(input.conversationId);
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, data: { totalMemberCount: result.value.totalMemberCount, members: result.value.members } };
+}
+
+async function handleAddMember(
+  input: z.infer<typeof AddMemberInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  const result = await addMember(input.conversationId, input.userId, input.role);
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, data: { ...result.value, message: 'Member added.' } };
+}
+
+async function handleRemoveMember(
+  input: z.infer<typeof RemoveMemberInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  const result = await removeMember(input.conversationId, input.userId);
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, data: { ...result.value, message: 'Member removed.' } };
+}
+
+async function handleLeaveChat(
+  input: z.infer<typeof LeaveChatInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  const result = await leaveChat(input.conversationId);
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, data: { ...result.value, message: 'Left the chat.' } };
+}
+
+async function handleRenameChat(
+  input: z.infer<typeof RenameChatInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  const result = await renameChat(input.conversationId, input.topic);
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, data: { ...result.value, message: 'Chat renamed.' } };
+}
+
+async function handleForwardMessage(
+  input: z.infer<typeof ForwardMessageInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  const result = await forwardMessage(
+    input.sourceConversationId,
+    input.messageId,
+    input.targetConversationId,
+    input.comment
+  );
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, data: { ...result.value, message: 'Message forwarded.' } };
+}
+
+async function handlePinMessage(
+  input: z.infer<typeof PinMessageInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  const result = await pinMessage(input.conversationId, input.messageId);
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, data: { ...result.value, message: 'Message pinned.' } };
+}
+
+async function handleUnpinMessage(
+  input: z.infer<typeof UnpinMessageInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  const result = await unpinMessage(input.conversationId);
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, data: { ...result.value, message: 'Pinned messages cleared.' } };
+}
+
+async function handleMuteChat(
+  input: z.infer<typeof MuteChatInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  const result = await setMuted(input.conversationId, true);
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, data: { ...result.value, message: 'Conversation muted.' } };
+}
+
+async function handleUnmuteChat(
+  input: z.infer<typeof MuteChatInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  const result = await setMuted(input.conversationId, false);
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, data: { ...result.value, message: 'Conversation unmuted.' } };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Exports
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1080,6 +1463,73 @@ export const getMessageTool: RegisteredTool<typeof GetMessageInputSchema> = {
   handler: handleGetMessage,
 };
 
+export const listChatsTool: RegisteredTool<typeof ListChatsInputSchema> = {
+  definition: listChatsToolDefinition,
+  schema: ListChatsInputSchema,
+  handler: handleListChats,
+};
+
+export const markUnreadTool: RegisteredTool<typeof MarkUnreadInputSchema> = {
+  definition: markUnreadToolDefinition,
+  schema: MarkUnreadInputSchema,
+  handler: handleMarkUnread,
+};
+
+export const listTeamsTool: RegisteredTool<typeof ListTeamsInputSchema> = {
+  definition: listTeamsToolDefinition,
+  schema: ListTeamsInputSchema,
+  handler: handleListTeams,
+};
+
+export const getChatMembersTool: RegisteredTool<typeof GetChatMembersInputSchema> = {
+  definition: getChatMembersToolDefinition,
+  schema: GetChatMembersInputSchema,
+  handler: handleGetChatMembers,
+};
+
+export const addMemberTool: RegisteredTool<typeof AddMemberInputSchema> = {
+  definition: addMemberToolDefinition,
+  schema: AddMemberInputSchema,
+  handler: handleAddMember,
+};
+
+export const removeMemberTool: RegisteredTool<typeof RemoveMemberInputSchema> = {
+  definition: removeMemberToolDefinition,
+  schema: RemoveMemberInputSchema,
+  handler: handleRemoveMember,
+};
+
+export const leaveChatTool: RegisteredTool<typeof LeaveChatInputSchema> = {
+  definition: leaveChatToolDefinition,
+  schema: LeaveChatInputSchema,
+  handler: handleLeaveChat,
+};
+
+export const renameChatTool: RegisteredTool<typeof RenameChatInputSchema> = {
+  definition: renameChatToolDefinition,
+  schema: RenameChatInputSchema,
+  handler: handleRenameChat,
+};
+
+export const forwardMessageTool: RegisteredTool<typeof ForwardMessageInputSchema> = {
+  definition: forwardMessageToolDefinition,
+  schema: ForwardMessageInputSchema,
+  handler: handleForwardMessage,
+};
+
+export const pinMessageTool: RegisteredTool<typeof PinMessageInputSchema> = {
+  definition: pinMessageToolDefinition, schema: PinMessageInputSchema, handler: handlePinMessage,
+};
+export const unpinMessageTool: RegisteredTool<typeof UnpinMessageInputSchema> = {
+  definition: unpinMessageToolDefinition, schema: UnpinMessageInputSchema, handler: handleUnpinMessage,
+};
+export const muteChatTool: RegisteredTool<typeof MuteChatInputSchema> = {
+  definition: muteChatToolDefinition, schema: MuteChatInputSchema, handler: handleMuteChat,
+};
+export const unmuteChatTool: RegisteredTool<typeof MuteChatInputSchema> = {
+  definition: unmuteChatToolDefinition, schema: MuteChatInputSchema, handler: handleUnmuteChat,
+};
+
 /** All message-related tools. */
 export const messageTools = [
   sendMessageTool,
@@ -1101,4 +1551,17 @@ export const messageTools = [
   getSavedMessagesTool,
   getFollowedThreadsTool,
   getMessageTool,
+  listChatsTool,
+  markUnreadTool,
+  listTeamsTool,
+  getChatMembersTool,
+  addMemberTool,
+  removeMemberTool,
+  leaveChatTool,
+  renameChatTool,
+  forwardMessageTool,
+  pinMessageTool,
+  unpinMessageTool,
+  muteChatTool,
+  unmuteChatTool,
 ];

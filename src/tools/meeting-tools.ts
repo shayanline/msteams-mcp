@@ -14,6 +14,7 @@ import {
   cancelMeeting,
   respondToMeeting,
   getSchedule,
+  findMeetingTimes,
 } from '../api/calendar-api.js';
 import { getTranscriptContent } from '../api/transcript-api.js';
 import {
@@ -86,6 +87,14 @@ export const GetScheduleInputSchema = z.object({
   startTime: z.string().min(1),
   endTime: z.string().min(1),
   availabilityViewInterval: z.number().min(5).max(1440).optional().default(30),
+});
+
+export const FindMeetingTimesInputSchema = z.object({
+  attendees: z.array(z.string().email()).min(1),
+  durationMinutes: z.number().min(15).max(480).optional().default(30),
+  start: z.string().optional(),
+  end: z.string().optional(),
+  maxCandidates: z.number().min(1).max(20).optional().default(5),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -394,6 +403,38 @@ const getScheduleToolDefinition: Tool = {
   },
 };
 
+const findMeetingTimesToolDefinition: Tool = {
+  name: 'teams_find_meeting_times',
+  description: 'Suggest meeting time slots that work for a set of attendees, based on their free/busy. Returns ranked candidate slots with a confidence score and each attendee\'s availability. Use this to pick a time before creating a meeting with teams_create_meeting.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      attendees: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Attendee email addresses to find a common slot for.',
+      },
+      durationMinutes: {
+        type: 'number',
+        description: 'Meeting length in minutes (default 30, min 15, max 480).',
+      },
+      start: {
+        type: 'string',
+        description: 'Earliest start to consider (ISO 8601 UTC). Defaults to now.',
+      },
+      end: {
+        type: 'string',
+        description: 'Latest end to consider (ISO 8601 UTC). Defaults to 5 days out.',
+      },
+      maxCandidates: {
+        type: 'number',
+        description: 'Maximum number of suggestions to return (default 5).',
+      },
+    },
+    required: ['attendees'],
+  },
+};
+
 async function handleGetSchedule(
   input: z.infer<typeof GetScheduleInputSchema>,
   _ctx: ToolContext
@@ -405,6 +446,23 @@ async function handleGetSchedule(
     availabilityViewInterval: input.availabilityViewInterval,
   });
   return handleApiResult(result, (value) => ({ schedules: value.schedules }));
+}
+
+async function handleFindMeetingTimes(
+  input: z.infer<typeof FindMeetingTimesInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  const result = await findMeetingTimes({
+    attendees: input.attendees,
+    durationMinutes: input.durationMinutes,
+    start: input.start,
+    end: input.end,
+    maxCandidates: input.maxCandidates,
+  });
+  return handleApiResult(result, (value) => ({
+    suggestions: value.suggestions,
+    emptyReason: value.emptyReason,
+  }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -490,6 +548,12 @@ export const getScheduleTool: RegisteredTool<typeof GetScheduleInputSchema> = {
   handler: handleGetSchedule,
 };
 
+export const findMeetingTimesTool: RegisteredTool<typeof FindMeetingTimesInputSchema> = {
+  definition: findMeetingTimesToolDefinition,
+  schema: FindMeetingTimesInputSchema,
+  handler: handleFindMeetingTimes,
+};
+
 export const getTranscriptTool: RegisteredTool<typeof GetTranscriptInputSchema> = {
   definition: getTranscriptToolDefinition,
   schema: GetTranscriptInputSchema,
@@ -505,5 +569,6 @@ export const meetingTools = [
   cancelMeetingTool,
   respondToMeetingTool,
   getScheduleTool,
+  findMeetingTimesTool,
   getTranscriptTool,
 ];
