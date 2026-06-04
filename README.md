@@ -51,7 +51,7 @@ That's it. `npx` will automatically download and run the latest version.
 If you prefer to run from a local clone:
 
 ```bash
-git clone https://github.com/m0nkmaster/msteams-mcp.git
+git clone https://github.com/shayanline/msteams-mcp.git
 cd msteams-mcp
 npm install && npm run build
 ```
@@ -287,7 +287,7 @@ If your session expires, call `teams_login` or delete the config directory.
 For local development:
 
 ```bash
-git clone https://github.com/m0nkmaster/msteams-mcp.git
+git clone https://github.com/shayanline/msteams-mcp.git
 cd msteams-mcp
 npm install
 npm run build
