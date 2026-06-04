@@ -68,4 +68,44 @@ describe('getTranscriptContent', () => {
     expect(res.ok).toBe(false);
     expect(mockHttp).not.toHaveBeenCalled();
   });
+
+  it('propagates an http failure', async () => {
+    mockHttp.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
+    const res = await getTranscriptContent('19:m@thread.v2');
+    expect(res.ok).toBe(false);
+  });
+
+  it('errors when the parsed transcript has no entries field at all', async () => {
+    mockHttp.mockResolvedValueOnce(httpOk({ value: [fileItem(JSON.stringify({ meta: 1 }))] }));
+    const res = await getTranscriptContent('19:m@thread.v2');
+    expect(res.ok).toBe(false);
+  });
+
+  it('defaults missing entry fields and filters out empty speakers', async () => {
+    const tj = JSON.stringify({ entries: [
+      { startOffset: '00:00:010000', endOffset: '00:05:010000', speakerDisplayName: 'Alice', text: 'Hello' },
+      {}, // no offsets/speaker/text -> all default to empty strings, speaker filtered out
+    ] });
+    mockHttp.mockResolvedValueOnce(httpOk({ value: [fileItem(tj)] }));
+    const res = await getTranscriptContent('19:meeting@thread.v2');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.entryCount).toBe(2);
+    expect(res.value.speakers).toEqual(['Alice']);
+    expect(res.value.entries[1]).toEqual({ startTime: '', endTime: '', speaker: '', text: '' });
+  });
+
+  it('reports a non-Error parse failure as unknown error', async () => {
+    const spy = vi.spyOn(JSON, 'parse').mockImplementationOnce(() => { throw 'boom'; });
+    mockHttp.mockResolvedValueOnce(httpOk({ value: [fileItem('{}')] }));
+    const res = await getTranscriptContent('19:m@thread.v2');
+    expect(res.ok).toBe(false);
+    spy.mockRestore();
+  });
+
+  it('handles a recording item missing ItemProperties/Visualization', async () => {
+    mockHttp.mockResolvedValueOnce(httpOk({ value: [{}] }));
+    const res = await getTranscriptContent('19:m@thread.v2');
+    expect(res.ok).toBe(false); // no TranscriptJson -> NOT_FOUND
+  });
 });

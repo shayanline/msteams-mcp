@@ -1410,3 +1410,262 @@ describe('parseEmailSearchResults', () => {
     expect(results).toHaveLength(0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Additional branch coverage: parsers-search
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('parseV2Result - extra branch coverage', () => {
+  it('uses Summary when HitHighlightedSummary is absent', () => {
+    const result = parseV2Result({
+      Summary: 'This is a sufficiently long summary body for the parser to keep.',
+      ReferenceId: 'ref-123',
+      Source: {
+        ClientConversationId: '19:conv@thread.tacv2',
+        DateTimeReceived: '2024-01-01T00:00:00Z',
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.content).toContain('sufficiently long summary');
+    expect(result!.id).toBe('ref-123');
+  });
+
+  it('generates a v2- id when both Id and ReferenceId are missing', () => {
+    const result = parseV2Result({
+      HitHighlightedSummary: 'A long enough content string to pass the minimum length check.',
+    });
+    expect(result).not.toBeNull();
+    expect(result!.id).toMatch(/^v2-/);
+  });
+
+  it('derives conversationId from ClientConversationId and extracts links', () => {
+    const result = parseV2Result({
+      Id: 'id-1',
+      HitHighlightedSummary:
+        'Some content long enough to parse <a href="https://example.com">details</a> here.',
+      Source: {
+        ClientConversationId: '19:abc@thread.tacv2;messageid=1700000000000',
+        DateTimeReceived: '2024-01-01T00:00:00Z',
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.conversationId).toBe('19:abc@thread.tacv2');
+    expect(result!.links).toBeDefined();
+  });
+});
+
+describe('parseEmailResult - extra branch coverage', () => {
+  it('extracts sender from a structured From with EmailAddress and parses metadata', () => {
+    const result = parseEmailResult({
+      Subject: 'Hello there',
+      HitHighlightedSummary: 'preview body, <a href="https://example.com">see</a>',
+      Source: {
+        From: { EmailAddress: { Name: 'Jane Doe', Address: 'jane@example.com' } },
+        Importance: 'High',
+        HasAttachments: true,
+        IsRead: false,
+        ConversationId: { Id: 'conv-id-1' },
+        WebLink: 'https://outlook.example.com/mail',
+        DateTimeReceived: '2024-01-01T00:00:00Z',
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.sender).toBe('Jane Doe');
+    expect(result!.senderEmail).toBe('jane@example.com');
+    expect(result!.importance).toBe('High');
+    expect(result!.hasAttachments).toBe(true);
+    expect(result!.isRead).toBe(false);
+    expect(result!.conversationId).toBe('conv-id-1');
+    expect(result!.links).toBeDefined();
+  });
+
+  it('extracts sender from a structured From without EmailAddress (Name/Address)', () => {
+    const result = parseEmailResult({
+      Subject: 'Subject line',
+      HitHighlightedSummary: 'preview',
+      Source: {
+        From: { Name: 'Bob', Address: 'bob@example.com' },
+        HasAttachment: false,
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.sender).toBe('Bob');
+    expect(result!.senderEmail).toBe('bob@example.com');
+    expect(result!.hasAttachments).toBe(false);
+  });
+
+  it('uses DisplayName/Address fallbacks on a structured From', () => {
+    const result = parseEmailResult({
+      Subject: 'Subject line',
+      HitHighlightedSummary: 'preview',
+      Source: {
+        From: { DisplayName: 'Carol', Address: 'carol@example.com' },
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.sender).toBe('Carol');
+    expect(result!.senderEmail).toBe('carol@example.com');
+  });
+
+  it('uses a string From directly as the sender', () => {
+    const result = parseEmailResult({
+      Subject: 'String from',
+      HitHighlightedSummary: 'body preview text here',
+      Source: { From: 'Plain Sender Name', FromAddress: 'plain@example.com' },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.sender).toBe('Plain Sender Name');
+    expect(result!.senderEmail).toBe('plain@example.com');
+  });
+
+  it('falls back to flat sender fields when From is absent', () => {
+    const result = parseEmailResult({
+      Subject: 'Flat sender',
+      Source: { Sender: 'Flat Name', SenderSmtpAddress: 'flat-sender@example.com' },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.sender).toBe('Flat Name');
+    expect(result!.senderEmail).toBe('flat-sender@example.com');
+  });
+
+  it('generates an email- id and uses InternetMessageId as conversation id', () => {
+    const result = parseEmailResult({
+      Subject: 'Has a subject',
+      Source: { InternetMessageId: '<msg-1@example.com>' },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.id).toMatch(/^email-/);
+    expect(result!.conversationId).toBe('<msg-1@example.com>');
+  });
+
+  it('parses array recipients with EmailAddress objects and flat fields', () => {
+    const result = parseEmailResult({
+      Subject: 'Recipients test',
+      HitHighlightedSummary: 'preview',
+      Source: {
+        ToRecipients: [
+          { EmailAddress: { Name: 'Alice', Address: 'alice@example.com' } },
+          { EmailAddress: { Address: 'noname@example.com' } },
+        ],
+        CcRecipients: [
+          { Name: 'Dan' },
+          { Address: 'flat@example.com' },
+          { EmailAddress: {} },
+        ],
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.toRecipients).toEqual(['Alice', 'noname@example.com']);
+    expect(result!.ccRecipients).toEqual(['Dan', 'flat@example.com']);
+  });
+
+  it('parses semicolon-separated string recipients and trims empties', () => {
+    const result = parseEmailResult({
+      Subject: 'String recipients',
+      Source: { DisplayTo: 'John Smith; Jane Doe ; ' },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.toRecipients).toEqual(['John Smith', 'Jane Doe']);
+  });
+
+  it('returns undefined recipients when none resolve to a display value', () => {
+    const result = parseEmailResult({
+      Subject: 'Empty recipients',
+      Source: { ToRecipients: [{ EmailAddress: {} }] },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.toRecipients).toBeUndefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Additional branch coverage: parsers-channels
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('parseChannelResults / parseTeamsList - extra branch coverage', () => {
+  it('skips groups without a Suggestions array and null channel suggestions', () => {
+    const results = parseChannelResults([
+      { NoSuggestions: true },
+      {
+        Suggestions: [
+          {
+            EntityType: 'ChannelSuggestion',
+            Name: 'General',
+            ThreadId: '19:g@thread.tacv2',
+            TeamName: 'Team',
+            GroupId: 'grp-1',
+          },
+          { EntityType: 'ChannelSuggestion', Name: 'Incomplete' }, // missing fields -> null
+          { EntityType: 'PersonSuggestion', Name: 'ignored' }, // wrong type
+        ],
+      },
+    ]);
+    expect(results).toHaveLength(1);
+    expect(results[0].channelName).toBe('General');
+  });
+
+  it('skips channels missing ids/names and defaults a missing groupId', () => {
+    const teams = parseTeamsList({
+      teams: [
+        {
+          id: '19:team@thread.tacv2',
+          displayName: 'My Team',
+          channels: [
+            { id: '19:c1@thread.tacv2', displayName: 'Chan One' }, // no groupId -> ''
+            { id: '19:c2@thread.tacv2' }, // missing displayName -> skip
+            { displayName: 'No Id' }, // missing id -> skip
+          ],
+        },
+        {
+          id: '19:team2@thread.tacv2',
+          displayName: 'No Channels Team',
+          // no channels array
+        },
+      ],
+    });
+    expect(teams).toHaveLength(2);
+    expect(teams[0].channels).toHaveLength(1);
+    expect(teams[0].channels[0].teamId).toBe('');
+    expect(teams[1].channels).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Additional branch coverage: parsers-virtual
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('parseVirtualConversationMessage / formatTranscriptText - extra branch coverage', () => {
+  it('uses msg.type when messagetype is absent and tolerates missing content/clumpId', () => {
+    const result = parseVirtualConversationMessage(
+      {
+        type: 'RichText/Html',
+        id: 'msg-1',
+        from: '8:orgid:user',
+        composetime: '2024-01-01T00:00:00Z',
+      },
+      /saved:(\d+)/,
+    );
+    expect(result).not.toBeNull();
+    expect(result!.contentType).toBe('RichText/Html');
+    expect(result!.content).toBe('');
+    expect(result!.sourceConversationId).toBe('');
+  });
+
+  it('formats a transcript flushing an empty-speaker block before a named speaker', () => {
+    const out = formatTranscriptText([
+      { startTime: '00:00:01', endTime: '00:00:02', speaker: '', text: 'no speaker line' },
+      { startTime: '00:00:03', endTime: '00:00:04', speaker: 'Alice', text: 'alice line' },
+    ]);
+    expect(out).toContain('[00:00:01]');
+    expect(out).toContain('Alice:');
+  });
+
+  it('formats a transcript whose final block has no speaker', () => {
+    const out = formatTranscriptText([
+      { startTime: '00:00:05', endTime: '00:00:06', speaker: '', text: 'first' },
+      { startTime: '00:00:07', endTime: '00:00:08', speaker: '', text: 'second' },
+    ]);
+    expect(out).toContain('[00:00:05]');
+    expect(out).toContain('first second');
+  });
+});

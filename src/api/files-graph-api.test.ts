@@ -123,4 +123,96 @@ describe('sendFileToChat', () => {
     expect(content).toContain('[report.pdf](https://share/r)');
     expect(content).toContain('see this');
   });
+
+  it('posts without a caption when none is given', async () => {
+    mockRead.mockResolvedValueOnce(Buffer.from('hi'));
+    mockHttp
+      .mockResolvedValueOnce(httpOk({ id: '01X', name: 'report.pdf' }))
+      .mockResolvedValueOnce(httpOk({ link: { webUrl: 'https://share/r' } }));
+    mockSend.mockResolvedValueOnce(ok({ messageId: 'm', timestamp: 1 }) as never);
+    const res = await sendFileToChat('48:notes', '/tmp/report.pdf');
+    expect(res.ok).toBe(true);
+    const [, content] = mockSend.mock.calls[0] as [string, string];
+    expect(content).toBe('[report.pdf](https://share/r)');
+  });
+
+  it('returns the upload error when uploading fails', async () => {
+    mockRead.mockRejectedValueOnce(new Error('ENOENT'));
+    const res = await sendFileToChat('48:notes', '/tmp/missing.pdf');
+    expect(res.ok).toBe(false);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it('returns the share-link error when no link is produced', async () => {
+    mockRead.mockResolvedValueOnce(Buffer.from('hi'));
+    mockHttp
+      .mockResolvedValueOnce(httpOk({ id: '01X', name: 'report.pdf' })) // upload
+      .mockResolvedValueOnce(httpOk({})); // createLink -> no link
+    const res = await sendFileToChat('48:notes', '/tmp/report.pdf');
+    expect(res.ok).toBe(false);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it('returns the send error when posting the message fails', async () => {
+    mockRead.mockResolvedValueOnce(Buffer.from('hi'));
+    mockHttp
+      .mockResolvedValueOnce(httpOk({ id: '01X', name: 'report.pdf' }))
+      .mockResolvedValueOnce(httpOk({ link: { webUrl: 'https://share/r' } }));
+    mockSend.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
+    const res = await sendFileToChat('48:notes', '/tmp/report.pdf');
+    expect(res.ok).toBe(false);
+  });
+});
+
+describe('auth and error propagation', () => {
+  const AUTH_ERR = { ok: false, error: { code: 'AUTH_REQUIRED' } } as never;
+  const httpErr = { ok: false, error: { code: 'API_ERROR' } } as never;
+
+  it('listDriveFiles returns the auth error and propagates http errors and empty values', async () => {
+    mockAuth.mockReturnValueOnce(AUTH_ERR);
+    expect((await listDriveFiles()).ok).toBe(false);
+    expect(mockHttp).not.toHaveBeenCalled();
+
+    mockHttp.mockResolvedValueOnce(httpErr);
+    expect((await listDriveFiles()).ok).toBe(false);
+
+    mockHttp.mockResolvedValueOnce(httpOk({})); // no value field -> defaults to []
+    const res = await listDriveFiles();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.items).toEqual([]);
+  });
+
+  it('uploadFile returns the auth error, rejects oversize files and propagates http errors', async () => {
+    mockAuth.mockReturnValueOnce(AUTH_ERR);
+    expect((await uploadFile('/tmp/x.txt')).ok).toBe(false);
+
+    mockRead.mockResolvedValueOnce({ length: 251 * 1024 * 1024 } as never);
+    const big = await uploadFile('/tmp/big.bin');
+    expect(big.ok).toBe(false);
+    expect(mockHttp).not.toHaveBeenCalled();
+
+    mockRead.mockResolvedValueOnce(Buffer.from('hi'));
+    mockHttp.mockResolvedValueOnce(httpErr);
+    expect((await uploadFile('/tmp/x.txt')).ok).toBe(false);
+  });
+
+  it('downloadFile returns the auth error and handles a text() rejection', async () => {
+    mockAuth.mockReturnValueOnce(AUTH_ERR);
+    expect((await downloadFile('01X', '/tmp/o')).ok).toBe(false);
+
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => { throw new Error('no body'); } });
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await downloadFile('01X', '/tmp/o');
+    expect(res.ok).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('createShareLink returns the auth error and propagates http errors', async () => {
+    mockAuth.mockReturnValueOnce(AUTH_ERR);
+    expect((await createShareLink('01X')).ok).toBe(false);
+
+    mockHttp.mockResolvedValueOnce(httpErr);
+    expect((await createShareLink('01X')).ok).toBe(false);
+  });
 });

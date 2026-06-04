@@ -131,4 +131,89 @@ describe('setTaskCompleted', () => {
     await setTaskCompleted('L1', 't1', false);
     expect(JSON.parse((mockHttp.mock.calls[0][1] as { body: string }).body)).toEqual({ status: 'notStarted' });
   });
+
+  it('propagates auth failure', async () => {
+    mockAuth.mockReturnValueOnce({ ok: false, error: { code: 'AUTH_REQUIRED' } } as never);
+    const res = await setTaskCompleted('L1', 't1');
+    expect(res.ok).toBe(false);
+    expect(mockHttp).not.toHaveBeenCalled();
+  });
+
+  it('propagates http failure', async () => {
+    mockHttp.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
+    const res = await setTaskCompleted('L1', 't1');
+    expect(res.ok).toBe(false);
+  });
+});
+
+describe('parseTask defaults', () => {
+  it('defaults title and status and strips body that becomes empty', async () => {
+    mockHttp.mockResolvedValueOnce(httpOk({ value: [
+      { id: 't1', body: { content: '<p>  </p>' } },                 // strips to '' -> body undefined
+      { id: 't2', title: 'Keep', status: 'completed', body: {} },   // body without content
+    ] }));
+    const res = await listTasks({ listId: 'L1', includeCompleted: true });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.tasks[0]).toMatchObject({ id: 't1', title: '', status: 'notStarted', body: undefined });
+    expect(res.value.tasks[1]).toMatchObject({ id: 't2', title: 'Keep', status: 'completed', body: undefined });
+  });
+});
+
+describe('listTaskLists edge cases', () => {
+  it('defaults the display name when absent', async () => {
+    mockHttp.mockResolvedValueOnce(httpOk({})); // no value field -> []
+    const res = await listTaskLists();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.lists).toEqual([]);
+  });
+});
+
+describe('default list resolution', () => {
+  it('falls back to the first list when none is flagged default', async () => {
+    mockHttp
+      .mockResolvedValueOnce(httpOk({ value: [{ id: 'first', displayName: 'A' }, { id: 'second', displayName: 'B' }] }))
+      .mockResolvedValueOnce(httpOk({ value: [] }));
+    const res = await listTasks({});
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.listId).toBe('first');
+  });
+
+  it('uses an empty list id when there are no lists at all', async () => {
+    mockHttp
+      .mockResolvedValueOnce(httpOk({ value: [] }))
+      .mockResolvedValueOnce(httpOk({ value: [] }));
+    const res = await listTasks({});
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.listId).toBe('');
+  });
+
+  it('propagates a failure when resolving the default list', async () => {
+    mockHttp.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
+    const res = await listTasks({});
+    expect(res.ok).toBe(false);
+  });
+
+  it('propagates a failure when resolving the default list for createTask', async () => {
+    mockHttp.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
+    const res = await createTask({ title: 'T' });
+    expect(res.ok).toBe(false);
+  });
+});
+
+describe('listTasks / createTask http failures', () => {
+  it('listTasks propagates an http failure', async () => {
+    mockHttp.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
+    const res = await listTasks({ listId: 'L1' });
+    expect(res.ok).toBe(false);
+  });
+
+  it('createTask propagates an http failure', async () => {
+    mockHttp.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
+    const res = await createTask({ title: 'T', listId: 'L1' });
+    expect(res.ok).toBe(false);
+  });
 });

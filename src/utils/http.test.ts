@@ -296,3 +296,123 @@ describe('clearRateLimitState', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('httpRequest - additional branch coverage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal('fetch', vi.fn());
+    clearRateLimitState();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('classifies ETIMEDOUT as a NETWORK_ERROR', async () => {
+    vi.mocked(fetch).mockImplementation(() => Promise.reject(new Error('connect ETIMEDOUT')));
+
+    const result = await httpRequest('https://api.example.com/data', { maxRetries: 1 });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('NETWORK_ERROR');
+  });
+
+  it('classifies ENOTFOUND as a NETWORK_ERROR', async () => {
+    vi.mocked(fetch).mockImplementation(() => Promise.reject(new Error('getaddrinfo ENOTFOUND host')));
+
+    const result = await httpRequest('https://api.example.com/data', { maxRetries: 1 });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('NETWORK_ERROR');
+  });
+
+  it('returns UNKNOWN for a generic (non-network) Error', async () => {
+    vi.mocked(fetch).mockImplementation(() => Promise.reject(new Error('something unexpected')));
+
+    const result = await httpRequest('https://api.example.com/data', { maxRetries: 1 });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('UNKNOWN');
+      expect(result.error.message).toContain('something unexpected');
+    }
+  });
+
+  it('returns UNKNOWN and stringifies non-Error rejections', async () => {
+    vi.mocked(fetch).mockImplementation(() => Promise.reject('plain string failure'));
+
+    const result = await httpRequest('https://api.example.com/data', { maxRetries: 1 });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('UNKNOWN');
+      expect(result.error.message).toContain('plain string failure');
+    }
+  });
+
+  it('parses an empty JSON body to an empty object', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response('', { status: 200, headers: { 'Content-Type': 'application/json' } })
+    );
+
+    const result = await httpRequest('https://api.example.com/data');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.data).toEqual({});
+  });
+
+  it('handles a response with no content-type header at all', async () => {
+    // A null body Response carries no content-type header (unlike a string body).
+    vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 200 }));
+
+    const result = await httpRequest('https://api.example.com/data');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.data).toBe('');
+  });
+
+  it('handles HTTP 429 without a Retry-After header', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response('Rate Limited', { status: 429 }));
+
+    const result = await httpRequest('https://api.example.com/data', { maxRetries: 1 });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('RATE_LIMITED');
+  });
+
+  it('returns an UNKNOWN error when maxRetries is 0 (loop body never runs)', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response('{}', { status: 200 }));
+
+    const result = await httpRequest('https://api.example.com/data', { maxRetries: 0 });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('UNKNOWN');
+      expect(result.error.message).toBe('Request failed');
+    }
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it('fires the real timeout abort callback and returns TIMEOUT', async () => {
+    // fetch never resolves on its own; it only rejects when the abort signal fires,
+    // which exercises the setTimeout(() => controller.abort()) path with real timers.
+    vi.mocked(fetch).mockImplementation((_url, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      })
+    );
+
+    const result = await httpRequest('https://api.example.com/slow', {
+      timeoutMs: 10,
+      maxRetries: 1,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('TIMEOUT');
+  });
+});

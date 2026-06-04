@@ -436,3 +436,338 @@ describe('refreshTokensViaHttp', () => {
     expect(parsed.secret).toBe('rotated-refresh-token');
   });
 });
+
+// ============================================================================
+// Additional branch and function coverage
+// ============================================================================
+
+describe('refreshTokensViaHttp - additional branch and function coverage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  /** Builds a fetch implementation that succeeds for all token scopes and returns the given skype tokens. */
+  function successFetch(skypeTokens: { skypeToken?: string; expiresIn?: number } = { skypeToken: 'new-skype-token', expiresIn: 86400 }) {
+    return async (url: RequestInfo | URL) => {
+      const urlStr = String(url);
+      if (urlStr.includes('login.microsoftonline.com')) {
+        return new Response(JSON.stringify(makeTokenResponse('scope')), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (urlStr.includes('authsvc.teams.microsoft.com')) {
+        return new Response(JSON.stringify({ tokens: skypeTokens }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response('', { status: 500 });
+    };
+  }
+
+  it('returns AUTH_REQUIRED when the teams origin has no localStorage', async () => {
+    vi.mocked(readSessionState).mockReturnValue(makeMockSessionState());
+    vi.mocked(getTeamsOrigin).mockReturnValue(null);
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('AUTH_REQUIRED');
+  });
+
+  it('logs the client id when extraction fails because tenant id is missing', async () => {
+    const state = makeMockSessionState();
+    // Keep the refresh token entry but drop all access tokens so no realm/tenantId is found.
+    state.origins[0].localStorage = state.origins[0].localStorage.filter((item) => {
+      try { return JSON.parse(item.value).credentialType !== 'AccessToken'; }
+      catch { return true; }
+    });
+    vi.mocked(readSessionState).mockReturnValue(state);
+    vi.mocked(getTeamsOrigin).mockReturnValue(state.origins[0]);
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('AUTH_REQUIRED');
+  });
+
+  it('skips invalid-JSON localStorage entries during extraction and cache update', async () => {
+    const state = makeMockSessionState();
+    state.origins[0].localStorage.push({ name: 'garbage', value: '{not valid json' });
+    vi.mocked(readSessionState).mockReturnValue(state);
+    vi.mocked(getTeamsOrigin).mockReturnValue(state.origins[0]);
+    vi.mocked(fetch).mockImplementation(successFetch());
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('returns AUTH_REQUIRED when the teams origin disappears after extraction', async () => {
+    const state = makeMockSessionState();
+    vi.mocked(readSessionState).mockReturnValue(state);
+    vi.mocked(getTeamsOrigin)
+      .mockReturnValueOnce(state.origins[0])
+      .mockReturnValueOnce(null);
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('AUTH_REQUIRED');
+  });
+
+  it('returns UNKNOWN when every scope fails with a non-auth (500) error', async () => {
+    const state = makeMockSessionState();
+    vi.mocked(readSessionState).mockReturnValue(state);
+    vi.mocked(getTeamsOrigin).mockReturnValue(state.origins[0]);
+    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL) => {
+      if (String(url).includes('login.microsoftonline.com')) {
+        return new Response('boom-not-json', { status: 500 });
+      }
+      return new Response('', { status: 500 });
+    });
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('UNKNOWN');
+  });
+
+  it('returns UNKNOWN when every scope rejects with a non-Error value', async () => {
+    const state = makeMockSessionState();
+    vi.mocked(readSessionState).mockReturnValue(state);
+    vi.mocked(getTeamsOrigin).mockReturnValue(state.origins[0]);
+    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL) => {
+      if (String(url).includes('login.microsoftonline.com')) {
+        throw 'string failure';
+      }
+      return new Response('', { status: 500 });
+    });
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('UNKNOWN');
+  });
+
+  it('returns UNKNOWN when every scope aborts with an AbortError', async () => {
+    const state = makeMockSessionState();
+    vi.mocked(readSessionState).mockReturnValue(state);
+    vi.mocked(getTeamsOrigin).mockReturnValue(state.origins[0]);
+    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL) => {
+      if (String(url).includes('login.microsoftonline.com')) {
+        const error = new Error('aborted');
+        error.name = 'AbortError';
+        throw error;
+      }
+      return new Response('', { status: 500 });
+    });
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('UNKNOWN');
+  });
+
+  it('treats an AAD error without error_description as AUTH_EXPIRED', async () => {
+    const state = makeMockSessionState();
+    vi.mocked(readSessionState).mockReturnValue(state);
+    vi.mocked(getTeamsOrigin).mockReturnValue(state.origins[0]);
+    vi.mocked(fetch).mockImplementation(async () =>
+      new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })
+    );
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('AUTH_EXPIRED');
+      expect(result.error.message).toContain('invalid_grant');
+    }
+  });
+
+  it('handles a token endpoint whose error body cannot be read', async () => {
+    const state = makeMockSessionState();
+    vi.mocked(readSessionState).mockReturnValue(state);
+    vi.mocked(getTeamsOrigin).mockReturnValue(state.origins[0]);
+    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL) => {
+      if (String(url).includes('login.microsoftonline.com')) {
+        return { ok: false, status: 500, text: () => Promise.reject(new Error('unreadable')) } as unknown as Response;
+      }
+      return new Response('', { status: 500 });
+    });
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('UNKNOWN');
+  });
+
+  it('creates a new cache entry and defaults token_type when the response omits it', async () => {
+    const state = makeMockSessionState();
+    vi.mocked(readSessionState).mockReturnValue(state);
+    vi.mocked(getTeamsOrigin).mockReturnValue(state.origins[0]);
+    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL) => {
+      if (String(url).includes('login.microsoftonline.com')) {
+        return new Response(JSON.stringify({
+          access_token: 'at-no-type',
+          expires_in: 3600,
+          scope: 'https://graph.microsoft.com/.default',
+          // no token_type, no ext_expires_in, no refresh_token
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (String(url).includes('authsvc.teams.microsoft.com')) {
+        return new Response(JSON.stringify({ tokens: { skypeToken: 'st', expiresIn: 86400 } }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response('', { status: 500 });
+    });
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.refreshTokenRotated).toBe(false);
+  });
+
+  it('pushes new cookies when skype/auth cookies are not already present', async () => {
+    const state = makeMockSessionState();
+    state.cookies = []; // force the "push new cookie" branches
+    vi.mocked(readSessionState).mockReturnValue(state);
+    vi.mocked(getTeamsOrigin).mockReturnValue(state.origins[0]);
+    vi.mocked(fetch).mockImplementation(successFetch());
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(true);
+    const written = vi.mocked(writeSessionState).mock.calls[0][0];
+    expect(written.cookies.some((c: { name: string }) => c.name === 'skypetoken_asm')).toBe(true);
+    expect(written.cookies.some((c: { name: string }) => c.name === 'authtoken')).toBe(true);
+  });
+
+  it('defaults the auth-token expiry when the spaces token omits expires_in', async () => {
+    const state = makeMockSessionState();
+    vi.mocked(readSessionState).mockReturnValue(state);
+    vi.mocked(getTeamsOrigin).mockReturnValue(state.origins[0]);
+    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL) => {
+      if (String(url).includes('login.microsoftonline.com')) {
+        return new Response(JSON.stringify({
+          access_token: 'spaces-at',
+          token_type: 'Bearer',
+          scope: 'https://api.spaces.skype.com/.default',
+          // expires_in omitted -> exercises the `?? 3600` / `?? expires_in` fallbacks
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (String(url).includes('authsvc.teams.microsoft.com')) {
+        return new Response(JSON.stringify({ tokens: { skypeToken: 'st' } }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response('', { status: 500 });
+    });
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('treats a skype exchange that returns no token as non-fatal', async () => {
+    const state = makeMockSessionState();
+    vi.mocked(readSessionState).mockReturnValue(state);
+    vi.mocked(getTeamsOrigin).mockReturnValue(state.origins[0]);
+    vi.mocked(fetch).mockImplementation(successFetch({})); // tokens: {} -> no skypeToken
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.skypeTokenRefreshed).toBe(false);
+  });
+
+  it('defaults the skype expiry when expiresIn is omitted', async () => {
+    const state = makeMockSessionState();
+    vi.mocked(readSessionState).mockReturnValue(state);
+    vi.mocked(getTeamsOrigin).mockReturnValue(state.origins[0]);
+    vi.mocked(fetch).mockImplementation(successFetch({ skypeToken: 'only-token' })); // no expiresIn
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.skypeTokenRefreshed).toBe(true);
+  });
+
+  it('treats an unreadable skype error response as non-fatal', async () => {
+    const state = makeMockSessionState();
+    vi.mocked(readSessionState).mockReturnValue(state);
+    vi.mocked(getTeamsOrigin).mockReturnValue(state.origins[0]);
+    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL) => {
+      if (String(url).includes('login.microsoftonline.com')) {
+        return new Response(JSON.stringify(makeTokenResponse('scope')), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return { ok: false, status: 403, text: () => Promise.reject(new Error('nope')) } as unknown as Response;
+    });
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.skypeTokenRefreshed).toBe(false);
+  });
+
+  it('treats a skype exchange that rejects with a non-Error as non-fatal', async () => {
+    const state = makeMockSessionState();
+    vi.mocked(readSessionState).mockReturnValue(state);
+    vi.mocked(getTeamsOrigin).mockReturnValue(state.origins[0]);
+    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL) => {
+      if (String(url).includes('login.microsoftonline.com')) {
+        return new Response(JSON.stringify(makeTokenResponse('scope')), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      throw 'skype string failure';
+    });
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.skypeTokenRefreshed).toBe(false);
+  });
+
+  it('treats a skype exchange timeout as non-fatal and fires the abort timer', async () => {
+    vi.useFakeTimers();
+    try {
+      const state = makeMockSessionState();
+      vi.mocked(readSessionState).mockReturnValue(state);
+      vi.mocked(getTeamsOrigin).mockReturnValue(state.origins[0]);
+      vi.mocked(fetch).mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+        if (String(url).includes('login.microsoftonline.com')) {
+          return Promise.resolve(new Response(JSON.stringify(makeTokenResponse('scope')), {
+            status: 200, headers: { 'Content-Type': 'application/json' },
+          }));
+        }
+        // authsvc hangs until its abort signal fires (driven by the real setTimeout)
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+          });
+        });
+      });
+
+      const promise = refreshTokensViaHttp();
+      await vi.advanceTimersByTimeAsync(20000);
+      const result = await promise;
+
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.value.skypeTokenRefreshed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

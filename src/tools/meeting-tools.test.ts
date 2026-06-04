@@ -1,305 +1,187 @@
 /**
- * Unit tests for meeting/calendar tool input schemas.
- *
- * Tests schema validation, defaults, and boundary behaviour for the
- * calendar management tools (create/get/update/cancel/respond/schedule).
- *
- * Note: Schemas are defined locally to avoid circular import issues through
- * the tool registry. These MUST match the actual schemas in meeting-tools.ts.
+ * Unit tests for meeting/calendar tools (real handlers).
  */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ok, err } from '../types/result.js';
+import { createError, ErrorCode } from '../types/errors.js';
+import './index.js';
 
-import { describe, it, expect } from 'vitest';
-import { z } from 'zod';
+vi.mock('../api/calendar-api.js', () => ({
+  getCalendarView: vi.fn(),
+  createMeeting: vi.fn(),
+  getMeeting: vi.fn(),
+  updateMeeting: vi.fn(),
+  cancelMeeting: vi.fn(),
+  respondToMeeting: vi.fn(),
+  getSchedule: vi.fn(),
+  findMeetingTimes: vi.fn(),
+}));
+vi.mock('../api/transcript-api.js', () => ({ getTranscriptContent: vi.fn() }));
 
-// Local schema definitions to avoid circular imports through registry.
-// These MUST match the actual schemas in meeting-tools.ts.
-const AttendeeSchema = z.object({
-  email: z.string().email(),
-  name: z.string().optional(),
-});
+import {
+  getCalendarView,
+  createMeeting,
+  getMeeting,
+  updateMeeting,
+  cancelMeeting,
+  respondToMeeting,
+  getSchedule,
+  findMeetingTimes,
+} from '../api/calendar-api.js';
+import { getTranscriptContent } from '../api/transcript-api.js';
+import {
+  getMeetingsTool,
+  createMeetingTool,
+  getMeetingTool,
+  updateMeetingTool,
+  cancelMeetingTool,
+  respondToMeetingTool,
+  getScheduleTool,
+  findMeetingTimesTool,
+  getTranscriptTool,
+} from './meeting-tools.js';
 
-const CreateMeetingInputSchema = z.object({
-  subject: z.string().min(1),
-  startTime: z.string().min(1),
-  endTime: z.string().min(1),
-  attendees: z.array(AttendeeSchema).optional(),
-  body: z.string().optional(),
-  isOnlineMeeting: z.boolean().optional().default(true),
-  location: z.string().optional(),
-});
+const ctx = { server: {} } as never;
+const anErr = err(createError(ErrorCode.API_ERROR, 'boom'));
 
-const GetMeetingInputSchema = z.object({
-  eventId: z.string().min(1),
-});
+beforeEach(() => vi.clearAllMocks());
 
-const UpdateMeetingInputSchema = z.object({
-  eventId: z.string().min(1),
-  subject: z.string().min(1).optional(),
-  startTime: z.string().min(1).optional(),
-  endTime: z.string().min(1).optional(),
-  attendees: z.array(AttendeeSchema).optional(),
-  body: z.string().optional(),
-  location: z.string().optional(),
-});
-
-const CancelMeetingInputSchema = z.object({
-  eventId: z.string().min(1),
-});
-
-const RespondToMeetingInputSchema = z.object({
-  eventId: z.string().min(1),
-  response: z.enum(['accept', 'tentativelyAccept', 'decline']),
-  comment: z.string().optional(),
-  sendResponse: z.boolean().optional().default(true),
-  proposedNewTime: z.object({
-    start: z.string().min(1),
-    end: z.string().min(1),
-  }).optional(),
-});
-
-const GetScheduleInputSchema = z.object({
-  schedules: z.array(z.string().email()).min(1),
-  startTime: z.string().min(1),
-  endTime: z.string().min(1),
-  availabilityViewInterval: z.number().min(5).max(1440).optional().default(30),
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CreateMeetingInputSchema
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('CreateMeetingInputSchema', () => {
-  it('accepts the minimal required fields and defaults isOnlineMeeting', () => {
-    const result = CreateMeetingInputSchema.parse({
-      subject: 'Sync',
-      startTime: '2026-06-05T10:00:00Z',
-      endTime: '2026-06-05T10:30:00Z',
-    });
-    expect(result.subject).toBe('Sync');
-    expect(result.isOnlineMeeting).toBe(true);
-    expect(result.attendees).toBeUndefined();
+describe('getMeetingsTool', () => {
+  it('returns meetings on success', async () => {
+    vi.mocked(getCalendarView).mockResolvedValue(ok({ count: 1, meetings: [{ id: 'e1' }] }) as never);
+    const res = await getMeetingsTool.handler({ limit: 50 }, ctx);
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data).toEqual({ count: 1, meetings: [{ id: 'e1' }] });
   });
-
-  it('accepts attendees with valid emails and optional names', () => {
-    const result = CreateMeetingInputSchema.parse({
-      subject: 'Sync',
-      startTime: '2026-06-05T10:00:00Z',
-      endTime: '2026-06-05T10:30:00Z',
-      attendees: [
-        { email: 'chris@company.com', name: 'Chris' },
-        { email: 'noah@company.com' },
-      ],
-    });
-    expect(result.attendees).toHaveLength(2);
-    expect(result.attendees?.[1].name).toBeUndefined();
-  });
-
-  it('allows overriding isOnlineMeeting to false', () => {
-    const result = CreateMeetingInputSchema.parse({
-      subject: 'In person',
-      startTime: '2026-06-05T10:00:00Z',
-      endTime: '2026-06-05T10:30:00Z',
-      isOnlineMeeting: false,
-      location: 'Room 1',
-    });
-    expect(result.isOnlineMeeting).toBe(false);
-    expect(result.location).toBe('Room 1');
-  });
-
-  it('rejects an empty subject', () => {
-    expect(() => CreateMeetingInputSchema.parse({
-      subject: '',
-      startTime: '2026-06-05T10:00:00Z',
-      endTime: '2026-06-05T10:30:00Z',
-    })).toThrow();
-  });
-
-  it('rejects a missing startTime', () => {
-    expect(() => CreateMeetingInputSchema.parse({
-      subject: 'Sync',
-      endTime: '2026-06-05T10:30:00Z',
-    })).toThrow();
-  });
-
-  it('rejects an invalid attendee email', () => {
-    expect(() => CreateMeetingInputSchema.parse({
-      subject: 'Sync',
-      startTime: '2026-06-05T10:00:00Z',
-      endTime: '2026-06-05T10:30:00Z',
-      attendees: [{ email: 'not-an-email' }],
-    })).toThrow();
+  it('propagates errors', async () => {
+    vi.mocked(getCalendarView).mockResolvedValue(anErr as never);
+    expect((await getMeetingsTool.handler({ limit: 50 }, ctx)).success).toBe(false);
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GetMeetingInputSchema / CancelMeetingInputSchema
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('GetMeetingInputSchema', () => {
-  it('accepts a non-empty eventId', () => {
-    const result = GetMeetingInputSchema.parse({ eventId: 'abc123' });
-    expect(result.eventId).toBe('abc123');
+describe('createMeetingTool', () => {
+  it('returns created meeting fields', async () => {
+    vi.mocked(createMeeting).mockResolvedValue(
+      ok({ id: 'e1', subject: 's', startTime: 'a', endTime: 'b', joinUrl: 'u' }) as never
+    );
+    const res = await createMeetingTool.handler(
+      { subject: 's', startTime: 'a', endTime: 'b', isOnlineMeeting: true }, ctx
+    );
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data.id).toBe('e1');
   });
-
-  it('rejects an empty eventId', () => {
-    expect(() => GetMeetingInputSchema.parse({ eventId: '' })).toThrow();
-  });
-});
-
-describe('CancelMeetingInputSchema', () => {
-  it('accepts a non-empty eventId', () => {
-    expect(CancelMeetingInputSchema.parse({ eventId: 'abc123' }).eventId).toBe('abc123');
-  });
-
-  it('rejects a missing eventId', () => {
-    expect(() => CancelMeetingInputSchema.parse({})).toThrow();
+  it('propagates errors', async () => {
+    vi.mocked(createMeeting).mockResolvedValue(anErr as never);
+    const res = await createMeetingTool.handler(
+      { subject: 's', startTime: 'a', endTime: 'b', isOnlineMeeting: true }, ctx
+    );
+    expect(res.success).toBe(false);
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UpdateMeetingInputSchema
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('UpdateMeetingInputSchema', () => {
-  it('accepts eventId with no other fields', () => {
-    const result = UpdateMeetingInputSchema.parse({ eventId: 'abc123' });
-    expect(result.eventId).toBe('abc123');
-    expect(result.subject).toBeUndefined();
+describe('getMeetingTool', () => {
+  it('returns the meeting', async () => {
+    vi.mocked(getMeeting).mockResolvedValue(ok({ id: 'e1' }) as never);
+    const res = await getMeetingTool.handler({ eventId: 'e1' }, ctx);
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data).toEqual({ meeting: { id: 'e1' } });
   });
-
-  it('accepts a partial update with only a new time', () => {
-    const result = UpdateMeetingInputSchema.parse({
-      eventId: 'abc123',
-      startTime: '2026-06-05T11:00:00Z',
-      endTime: '2026-06-05T11:30:00Z',
-    });
-    expect(result.startTime).toBe('2026-06-05T11:00:00Z');
-  });
-
-  it('rejects an empty subject when provided', () => {
-    expect(() => UpdateMeetingInputSchema.parse({
-      eventId: 'abc123',
-      subject: '',
-    })).toThrow();
-  });
-
-  it('rejects an invalid attendee email', () => {
-    expect(() => UpdateMeetingInputSchema.parse({
-      eventId: 'abc123',
-      attendees: [{ email: 'nope' }],
-    })).toThrow();
+  it('propagates errors', async () => {
+    vi.mocked(getMeeting).mockResolvedValue(anErr as never);
+    expect((await getMeetingTool.handler({ eventId: 'e1' }, ctx)).success).toBe(false);
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// RespondToMeetingInputSchema
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('RespondToMeetingInputSchema', () => {
-  it('accepts a valid response and defaults sendResponse to true', () => {
-    const result = RespondToMeetingInputSchema.parse({
-      eventId: 'abc123',
-      response: 'accept',
-    });
-    expect(result.response).toBe('accept');
-    expect(result.sendResponse).toBe(true);
+describe('updateMeetingTool', () => {
+  it('updates and returns the meeting', async () => {
+    vi.mocked(updateMeeting).mockResolvedValue(ok({ id: 'e1', subject: 'new' }) as never);
+    const res = await updateMeetingTool.handler({ eventId: 'e1', subject: 'new' }, ctx);
+    expect(res.success).toBe(true);
+    expect(vi.mocked(updateMeeting)).toHaveBeenCalledWith('e1', { subject: 'new' });
   });
-
-  it('accepts a decline with a proposed new time and comment', () => {
-    const result = RespondToMeetingInputSchema.parse({
-      eventId: 'abc123',
-      response: 'decline',
-      comment: 'Conflicts with another call',
-      sendResponse: false,
-      proposedNewTime: {
-        start: '2026-06-06T10:00:00Z',
-        end: '2026-06-06T10:30:00Z',
-      },
-    });
-    expect(result.sendResponse).toBe(false);
-    expect(result.proposedNewTime?.start).toBe('2026-06-06T10:00:00Z');
-  });
-
-  it('rejects an unknown response value', () => {
-    expect(() => RespondToMeetingInputSchema.parse({
-      eventId: 'abc123',
-      response: 'maybe',
-    })).toThrow();
-  });
-
-  it('rejects a proposedNewTime missing the end field', () => {
-    expect(() => RespondToMeetingInputSchema.parse({
-      eventId: 'abc123',
-      response: 'decline',
-      proposedNewTime: { start: '2026-06-06T10:00:00Z' },
-    })).toThrow();
+  it('propagates errors', async () => {
+    vi.mocked(updateMeeting).mockResolvedValue(anErr as never);
+    expect((await updateMeetingTool.handler({ eventId: 'e1' }, ctx)).success).toBe(false);
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GetScheduleInputSchema
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('GetScheduleInputSchema', () => {
-  it('accepts a single schedule and defaults the interval to 30', () => {
-    const result = GetScheduleInputSchema.parse({
-      schedules: ['chris@company.com'],
-      startTime: '2026-06-05T09:00:00Z',
-      endTime: '2026-06-05T18:00:00Z',
-    });
-    expect(result.schedules).toEqual(['chris@company.com']);
-    expect(result.availabilityViewInterval).toBe(30);
+describe('cancelMeetingTool', () => {
+  it('returns success', async () => {
+    vi.mocked(cancelMeeting).mockResolvedValue(ok({}) as never);
+    const res = await cancelMeetingTool.handler({ eventId: 'e1' }, ctx);
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data).toEqual({ success: true });
   });
-
-  it('rejects an empty schedules array', () => {
-    expect(() => GetScheduleInputSchema.parse({
-      schedules: [],
-      startTime: '2026-06-05T09:00:00Z',
-      endTime: '2026-06-05T18:00:00Z',
-    })).toThrow();
+  it('propagates errors', async () => {
+    vi.mocked(cancelMeeting).mockResolvedValue(anErr as never);
+    expect((await cancelMeetingTool.handler({ eventId: 'e1' }, ctx)).success).toBe(false);
   });
+});
 
-  it('rejects a non-email entry in schedules', () => {
-    expect(() => GetScheduleInputSchema.parse({
-      schedules: ['not-an-email'],
-      startTime: '2026-06-05T09:00:00Z',
-      endTime: '2026-06-05T18:00:00Z',
-    })).toThrow();
+describe('respondToMeetingTool', () => {
+  it('responds successfully', async () => {
+    vi.mocked(respondToMeeting).mockResolvedValue(ok({}) as never);
+    const res = await respondToMeetingTool.handler(
+      { eventId: 'e1', response: 'accept', sendResponse: true }, ctx
+    );
+    expect(res.success).toBe(true);
   });
-
-  it('accepts the interval at boundary values', () => {
-    const min = GetScheduleInputSchema.parse({
-      schedules: ['a@company.com'],
-      startTime: '2026-06-05T09:00:00Z',
-      endTime: '2026-06-05T18:00:00Z',
-      availabilityViewInterval: 5,
-    });
-    expect(min.availabilityViewInterval).toBe(5);
-
-    const max = GetScheduleInputSchema.parse({
-      schedules: ['a@company.com'],
-      startTime: '2026-06-05T09:00:00Z',
-      endTime: '2026-06-05T18:00:00Z',
-      availabilityViewInterval: 1440,
-    });
-    expect(max.availabilityViewInterval).toBe(1440);
+  it('propagates errors', async () => {
+    vi.mocked(respondToMeeting).mockResolvedValue(anErr as never);
+    const res = await respondToMeetingTool.handler(
+      { eventId: 'e1', response: 'decline', sendResponse: true }, ctx
+    );
+    expect(res.success).toBe(false);
   });
+});
 
-  it('rejects an interval below the minimum', () => {
-    expect(() => GetScheduleInputSchema.parse({
-      schedules: ['a@company.com'],
-      startTime: '2026-06-05T09:00:00Z',
-      endTime: '2026-06-05T18:00:00Z',
-      availabilityViewInterval: 4,
-    })).toThrow();
+describe('getScheduleTool', () => {
+  it('returns schedules', async () => {
+    vi.mocked(getSchedule).mockResolvedValue(ok({ schedules: [{ email: 'a@b.com' }] }) as never);
+    const res = await getScheduleTool.handler(
+      { schedules: ['a@b.com'], startTime: 'a', endTime: 'b', availabilityViewInterval: 30 }, ctx
+    );
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data).toEqual({ schedules: [{ email: 'a@b.com' }] });
   });
+  it('propagates errors', async () => {
+    vi.mocked(getSchedule).mockResolvedValue(anErr as never);
+    const res = await getScheduleTool.handler(
+      { schedules: ['a@b.com'], startTime: 'a', endTime: 'b', availabilityViewInterval: 30 }, ctx
+    );
+    expect(res.success).toBe(false);
+  });
+});
 
-  it('rejects an interval above the maximum', () => {
-    expect(() => GetScheduleInputSchema.parse({
-      schedules: ['a@company.com'],
-      startTime: '2026-06-05T09:00:00Z',
-      endTime: '2026-06-05T18:00:00Z',
-      availabilityViewInterval: 1441,
-    })).toThrow();
+describe('findMeetingTimesTool', () => {
+  it('returns suggestions', async () => {
+    vi.mocked(findMeetingTimes).mockResolvedValue(ok({ suggestions: [{}], emptyReason: undefined }) as never);
+    const res = await findMeetingTimesTool.handler(
+      { attendees: ['a@b.com'], durationMinutes: 30, maxCandidates: 5 }, ctx
+    );
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data.suggestions).toEqual([{}]);
+  });
+  it('propagates errors', async () => {
+    vi.mocked(findMeetingTimes).mockResolvedValue(anErr as never);
+    const res = await findMeetingTimesTool.handler(
+      { attendees: ['a@b.com'], durationMinutes: 30, maxCandidates: 5 }, ctx
+    );
+    expect(res.success).toBe(false);
+  });
+});
+
+describe('getTranscriptTool', () => {
+  it('returns transcript content', async () => {
+    vi.mocked(getTranscriptContent).mockResolvedValue(
+      ok({ meetingTitle: 't', speakers: ['a'], entryCount: 2, formattedText: 'text' }) as never
+    );
+    const res = await getTranscriptTool.handler({ threadId: '19:meet@thread.v2' }, ctx);
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data.transcript).toBe('text');
+  });
+  it('propagates errors', async () => {
+    vi.mocked(getTranscriptContent).mockResolvedValue(anErr as never);
+    expect((await getTranscriptTool.handler({ threadId: 'x' }, ctx)).success).toBe(false);
   });
 });

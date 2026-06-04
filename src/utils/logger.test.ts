@@ -187,3 +187,42 @@ describe('logger', () => {
     });
   });
 });
+
+describe('getConfiguredLevel (module init from LOG_LEVEL)', () => {
+  const original = process.env.LOG_LEVEL;
+
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env.LOG_LEVEL;
+    } else {
+      process.env.LOG_LEVEL = original;
+    }
+    vi.resetModules();
+    vi.restoreAllMocks();
+  });
+
+  it('honours a valid LOG_LEVEL (case-insensitive) at import time', async () => {
+    process.env.LOG_LEVEL = 'DEBUG'; // upper-case exercises toLowerCase()
+    vi.resetModules();
+    const mod = await import('./logger.js');
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+
+    mod.debug('ctx', 'should be shown at debug level');
+
+    expect(debugSpy).toHaveBeenCalledWith('[ctx] should be shown at debug level');
+  });
+
+  it('falls back to info when LOG_LEVEL is set but invalid', async () => {
+    process.env.LOG_LEVEL = 'verbose'; // truthy but not a known level
+    vi.resetModules();
+    const mod = await import('./logger.js');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+
+    mod.info('ctx', 'info shows');
+    mod.debug('ctx', 'debug hidden');
+
+    expect(logSpy).toHaveBeenCalled();
+    expect(debugSpy).not.toHaveBeenCalled();
+  });
+});

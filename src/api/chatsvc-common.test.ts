@@ -39,4 +39,9 @@ describe('formatHumanReadableDate', () => {
     expect(result).toContain('January');
     expect(result).toContain('1970');
   });
+
+  it('returns empty string when date construction throws', () => {
+    // A Symbol cannot be converted by the Date constructor, hitting the catch branch.
+    expect(formatHumanReadableDate(Symbol('nope') as unknown as string)).toBe('');
+  });
 });
