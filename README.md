@@ -1,7 +1,9 @@
 # Teams MCP Server
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
+[![npm version](https://img.shields.io/npm/v/@shayanline/msteams-mcp.svg)](https://www.npmjs.com/package/@shayanline/msteams-mcp)
+[![npm downloads](https://img.shields.io/npm/dm/@shayanline/msteams-mcp.svg)](https://www.npmjs.com/package/@shayanline/msteams-mcp)
+[![node](https://img.shields.io/node/v/@shayanline/msteams-mcp.svg)](https://www.npmjs.com/package/@shayanline/msteams-mcp)
+[![license](https://img.shields.io/npm/l/@shayanline/msteams-mcp.svg)](./LICENSE)
 
 An MCP (Model Context Protocol) server that enables AI assistants to interact with Microsoft Teams. Search messages, send replies, manage favourites, and more.
 
