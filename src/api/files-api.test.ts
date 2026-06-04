@@ -66,4 +66,56 @@ describe('getSharedFiles', () => {
     const res = await getSharedFiles('19:c@thread.tacv2');
     expect(res.ok).toBe(false);
   });
+
+  it('fails when the user MRI has no extractable object id', async () => {
+    mockMsgAuth.mockReturnValueOnce(ok({ skypeToken: 'sk', authToken: 'at', userMri: '8:orgid:not-a-guid' }) as never);
+    const res = await getSharedFiles('19:c@thread.tacv2');
+    expect(res.ok).toBe(false);
+    expect(mockHttp).not.toHaveBeenCalled();
+  });
+
+  it('fails when the tenant id cannot be determined', async () => {
+    mockTenant.mockReturnValueOnce(null);
+    const res = await getSharedFiles('19:c@thread.tacv2');
+    expect(res.ok).toBe(false);
+    expect(mockHttp).not.toHaveBeenCalled();
+  });
+
+  it('propagates an http failure via the substrate error handler', async () => {
+    mockHttp.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
+    const res = await getSharedFiles('19:c@thread.tacv2');
+    expect(res.ok).toBe(false);
+  });
+
+  it('passes a skip token through to the request and returns no skipToken when absent', async () => {
+    mockHttp.mockResolvedValueOnce(httpOk({
+      Items: [
+        // File with only WebUrl (no FileUrl), no PreviewUrl, only SharedTime (no SharedDateTime)
+        { ItemType: 'File', FileData: { FileName: 'b.docx', WebUrl: 'http://sp/b', SizeInBytes: 9 }, SharedByDisplayName: 'Carol', SharedTime: '2026-02-02' },
+        // File with neither FileUrl nor WebUrl -> webUrl undefined
+        { ItemType: 'File', FileData: { FileName: 'c.txt' } },
+        // Unknown item type is ignored
+        { ItemType: 'Other' },
+      ],
+      // no SkipToken -> result skipToken should be undefined
+    }));
+    const res = await getSharedFiles('19:c@thread.tacv2', { pageSize: 10, skipToken: 'TKN' });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.skipToken).toBeUndefined();
+    expect(res.value.files[0]).toMatchObject({ itemType: 'File', webUrl: 'http://sp/b', sharedTime: '2026-02-02', previewUrl: undefined });
+    expect(res.value.files[1].webUrl).toBeUndefined();
+    expect(res.value.returned).toBe(2);
+    const url = mockHttp.mock.calls[0][0] as string;
+    expect(url).toContain('skiptoken=TKN');
+    expect(url).toContain('PageSize=10');
+  });
+
+  it('returns empty when the response has no Items field', async () => {
+    mockHttp.mockResolvedValueOnce(httpOk({}));
+    const res = await getSharedFiles('19:c@thread.tacv2');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.files).toEqual([]);
+  });
 });

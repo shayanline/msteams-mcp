@@ -68,4 +68,22 @@ describe('getPresence', () => {
     const res = await getPresence(['8:orgid:a']);
     expect(res.ok).toBe(false);
   });
+
+  it('defaults when presence and calendarData are absent', async () => {
+    mockHttp.mockResolvedValueOnce(httpOk([{ mri: '8:orgid:a' }]));
+    const res = await getPresence(['8:orgid:a']);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value[0]).toMatchObject({ id: '8:orgid:a', availability: 'Unknown', activity: 'Unknown', isOutOfOffice: false });
+  });
+
+  it('keeps an already-prefixed channel/bot MRI and tolerates a non-array payload', async () => {
+    mockHttp.mockResolvedValueOnce(httpOk({ notAnArray: true }));
+    const res = await getPresence(['28:bot-id']);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value).toEqual([]);
+    const body = JSON.parse((mockHttp.mock.calls[0][1] as { body: string }).body);
+    expect(body).toEqual([{ mri: '28:bot-id', source: 'ups' }]);
+  });
 });

@@ -8,7 +8,7 @@ vi.mock('./chatsvc-api.js', () => ({ getConversationProperties: vi.fn(), extract
 import { httpRequest } from '../utils/http.js';
 import { requireCsaAuth, getApiConfig } from '../utils/auth-guards.js';
 import { getConversationProperties, extractParticipantNames } from './chatsvc-api.js';
-import { getFavorites, addFavorite, getCustomEmojis, getMyTeamsAndChannels } from './csa-api.js';
+import { getFavorites, addFavorite, removeFavorite, getCustomEmojis, getMyTeamsAndChannels } from './csa-api.js';
 
 const mockHttp = vi.mocked(httpRequest);
 const mockAuth = vi.mocked(requireCsaAuth);
@@ -107,5 +107,115 @@ describe('getMyTeamsAndChannels', () => {
     const res = await getMyTeamsAndChannels();
     expect(res.ok).toBe(false);
     expect(mockHttp).not.toHaveBeenCalled();
+  });
+
+  it('propagates an http failure', async () => {
+    mockHttp.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
+    const res = await getMyTeamsAndChannels();
+    expect(res.ok).toBe(false);
+  });
+});
+
+describe('getFavorites error paths and enrichment fallbacks', () => {
+  it('propagates auth failure without calling http', async () => {
+    mockAuth.mockReturnValueOnce({ ok: false, error: { code: 'AUTH_REQUIRED' } } as never);
+    const res = await getFavorites();
+    expect(res.ok).toBe(false);
+    expect(mockHttp).not.toHaveBeenCalled();
+  });
+
+  it('propagates an http failure', async () => {
+    mockHttp.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
+    const res = await getFavorites();
+    expect(res.ok).toBe(false);
+  });
+
+  it('handles a Favorites folder with no items', async () => {
+    mockHttp.mockResolvedValueOnce(httpOk({ conversationFolders: [{ folderType: 'Favorites', id: 'fid' }] }));
+    const res = await getFavorites();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.favorites).toEqual([]);
+    expect(res.value.folderId).toBe('fid');
+  });
+
+  it('leaves the display name unset when both enrichment sources fail', async () => {
+    mockProps.mockResolvedValue({ ok: false, error: { code: 'NOT_FOUND' } } as never);
+    mockNames.mockResolvedValue({ ok: false, error: { code: 'NOT_FOUND' } } as never);
+    mockHttp.mockResolvedValueOnce(httpOk({ conversationFolders: [{ folderType: 'Favorites', id: 'fid', conversationFolderItems: [{ conversationId: '19:z' }] }] }));
+    const res = await getFavorites();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.favorites[0].displayName).toBeUndefined();
+  });
+});
+
+describe('modifyFavorite error paths', () => {
+  it('removeFavorite reads state then POSTs a RemoveItem action', async () => {
+    mockHttp
+      .mockResolvedValueOnce(httpOk({ folderHierarchyVersion: 3, conversationFolders: [{ folderType: 'Favorites', id: 'fid', conversationFolderItems: [] }] }))
+      .mockResolvedValueOnce(httpOk(null));
+    const res = await removeFavorite('19:z');
+    expect(res.ok).toBe(true);
+    const sent = JSON.parse((mockHttp.mock.calls[1][1] as { body: string }).body);
+    expect(sent.actions[0]).toMatchObject({ action: 'RemoveItem', folderId: 'fid', itemId: '19:z' });
+  });
+
+  it('returns the auth error before reading state', async () => {
+    mockAuth.mockReturnValueOnce({ ok: false, error: { code: 'AUTH_REQUIRED' } } as never);
+    const res = await addFavorite('19:z');
+    expect(res.ok).toBe(false);
+    expect(mockHttp).not.toHaveBeenCalled();
+  });
+
+  it('returns the error when reading current state fails', async () => {
+    mockHttp.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
+    const res = await addFavorite('19:z');
+    expect(res.ok).toBe(false);
+  });
+
+  it('errors when there is no Favorites folder to modify', async () => {
+    mockHttp.mockResolvedValueOnce(httpOk({ conversationFolders: [] }));
+    const res = await addFavorite('19:z');
+    expect(res.ok).toBe(false);
+  });
+
+  it('propagates a failure from the POST modification', async () => {
+    mockHttp
+      .mockResolvedValueOnce(httpOk({ folderHierarchyVersion: 1, conversationFolders: [{ folderType: 'Favorites', id: 'fid', conversationFolderItems: [] }] }))
+      .mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
+    const res = await addFavorite('19:z');
+    expect(res.ok).toBe(false);
+  });
+});
+
+describe('getCustomEmojis error paths and empty shapes', () => {
+  it('propagates auth failure', async () => {
+    mockAuth.mockReturnValueOnce({ ok: false, error: { code: 'AUTH_REQUIRED' } } as never);
+    const res = await getCustomEmojis();
+    expect(res.ok).toBe(false);
+    expect(mockHttp).not.toHaveBeenCalled();
+  });
+
+  it('propagates an http failure', async () => {
+    mockHttp.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
+    const res = await getCustomEmojis();
+    expect(res.ok).toBe(false);
+  });
+
+  it('returns an empty list when there are no categories', async () => {
+    mockHttp.mockResolvedValueOnce(httpOk({}));
+    const res = await getCustomEmojis();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.emojis).toEqual([]);
+  });
+
+  it('skips a category that has no emoticons', async () => {
+    mockHttp.mockResolvedValueOnce(httpOk({ categories: [{}, { emoticons: [{ id: 'e1;x', shortcuts: ['s'], description: 'd' }] }] }));
+    const res = await getCustomEmojis();
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.emojis).toEqual([{ id: 'e1;x', shortcut: 's', description: 'd', createdOn: undefined }]);
   });
 });

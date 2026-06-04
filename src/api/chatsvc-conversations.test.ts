@@ -155,4 +155,126 @@ describe('forwardMessage', () => {
     expect(res.ok).toBe(false);
     expect(mockSend).not.toHaveBeenCalled();
   });
+
+  it('forwards without a comment (no note prefix) and returns the send error', async () => {
+    mockGetMessage.mockResolvedValueOnce(ok({ id: '1', content: 'hi', contentType: 'text', sender: { mri: '8:orgid:x' }, timestamp: 't', conversationId: 's' }) as never);
+    mockSend.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
+    const res = await forwardMessage('19:src@thread.v2', '1', '48:notes');
+    expect(res.ok).toBe(false);
+    const [, , opts] = mockSend.mock.calls[0] as [string, string, { rawContentHtml: string }];
+    expect(opts.rawContentHtml).not.toContain('<br><br>'); // no comment note prefix
+  });
+});
+
+describe('auth failures', () => {
+  const AUTH_ERR = { ok: false, error: { code: 'AUTH_REQUIRED' } } as never;
+
+  it('getChatMembers returns the auth error without calling http', async () => {
+    mockAuth.mockReturnValueOnce(AUTH_ERR);
+    const res = await getChatMembers('19:c@thread.v2');
+    expect(res.ok).toBe(false);
+    expect(mockHttp).not.toHaveBeenCalled();
+  });
+
+  it('addMember returns the auth error', async () => {
+    mockAuth.mockReturnValueOnce(AUTH_ERR);
+    expect((await addMember('19:c@thread.v2', '8:orgid:peer')).ok).toBe(false);
+    expect(mockHttp).not.toHaveBeenCalled();
+  });
+
+  it('removeMember returns the auth error', async () => {
+    mockAuth.mockReturnValueOnce(AUTH_ERR);
+    expect((await removeMember('19:c@thread.v2', '8:orgid:peer')).ok).toBe(false);
+  });
+
+  it('leaveChat returns the auth error', async () => {
+    mockAuth.mockReturnValueOnce(AUTH_ERR);
+    expect((await leaveChat('19:c@thread.v2')).ok).toBe(false);
+  });
+
+  it('renameChat returns the auth error', async () => {
+    mockAuth.mockReturnValueOnce(AUTH_ERR);
+    expect((await renameChat('19:c@thread.v2', 'x')).ok).toBe(false);
+  });
+
+  it('setMuted returns the auth error', async () => {
+    mockAuth.mockReturnValueOnce(AUTH_ERR);
+    expect((await setMuted('19:c@thread.v2', true)).ok).toBe(false);
+  });
+
+  it('pinMessage returns the auth error (via setPinnedItems)', async () => {
+    mockAuth.mockReturnValueOnce(AUTH_ERR);
+    expect((await pinMessage('19:c@thread.v2', '1')).ok).toBe(false);
+    expect(mockHttp).not.toHaveBeenCalled();
+  });
+});
+
+describe('http failures propagate', () => {
+  const httpErr = { ok: false, error: { code: 'API_ERROR' } } as never;
+
+  it('getChatMembers propagates the http error', async () => {
+    mockHttp.mockResolvedValueOnce(httpErr);
+    expect((await getChatMembers('19:c@thread.v2')).ok).toBe(false);
+  });
+
+  it('addMember propagates the http error', async () => {
+    mockHttp.mockResolvedValueOnce(httpErr);
+    expect((await addMember('19:c@thread.v2', '8:orgid:peer')).ok).toBe(false);
+  });
+
+  it('removeMember propagates the http error', async () => {
+    mockHttp.mockResolvedValueOnce(httpErr);
+    expect((await removeMember('19:c@thread.v2', '8:orgid:peer')).ok).toBe(false);
+  });
+
+  it('removeMember rejects an invalid identifier without calling http', async () => {
+    const res = await removeMember('19:c@thread.v2', 'not-an-id');
+    expect(res.ok).toBe(false);
+    expect(mockHttp).not.toHaveBeenCalled();
+  });
+
+  it('leaveChat propagates the http error', async () => {
+    mockHttp.mockResolvedValueOnce(httpErr);
+    expect((await leaveChat('19:c@thread.v2')).ok).toBe(false);
+  });
+
+  it('renameChat propagates the http error', async () => {
+    mockHttp.mockResolvedValueOnce(httpErr);
+    expect((await renameChat('19:c@thread.v2', 'x')).ok).toBe(false);
+  });
+
+  it('pinMessage propagates the http error', async () => {
+    mockHttp.mockResolvedValueOnce(httpErr);
+    expect((await pinMessage('19:c@thread.v2', '1')).ok).toBe(false);
+  });
+
+  it('unpinMessage propagates the http error', async () => {
+    mockHttp.mockResolvedValueOnce(httpErr);
+    expect((await unpinMessage('19:c@thread.v2')).ok).toBe(false);
+  });
+
+  it('setMuted propagates the http error', async () => {
+    mockHttp.mockResolvedValueOnce(httpErr);
+    expect((await setMuted('19:c@thread.v2', false)).ok).toBe(false);
+  });
+});
+
+describe('getChatMembers defaults', () => {
+  it('defaults members to [], role to User and total to member count when absent', async () => {
+    mockHttp.mockResolvedValueOnce(httpOk({ members: [{ id: '8:orgid:nobody' }] }));
+    const res = await getChatMembers('19:c@thread.v2');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.members).toEqual([{ mri: '8:orgid:nobody', role: 'User', isCurrentUser: false }]);
+    expect(res.value.totalMemberCount).toBe(1);
+  });
+
+  it('returns an empty member list when the data has no members', async () => {
+    mockHttp.mockResolvedValueOnce(httpOk({}));
+    const res = await getChatMembers('19:c@thread.v2');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.members).toEqual([]);
+    expect(res.value.totalMemberCount).toBe(0);
+  });
 });
