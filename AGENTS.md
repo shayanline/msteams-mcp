@@ -4,8 +4,9 @@ This document captures project knowledge to help AI agents work effectively with
 
 ## Repository
 
-- **Repository**: https://github.com/m0nkmaster/msteams-mcp
-- **Install**: `npx -y msteams-mcp@latest` or clone the repo, `npm install && npm run build`, then point your MCP client to `dist/index.js`
+- **Repository**: https://github.com/shayanline/msteams-mcp
+- **Package**: [`@shayanline/msteams-mcp`](https://www.npmjs.com/package/@shayanline/msteams-mcp) (independent fork of [`m0nkmaster/msteams-mcp`](https://github.com/m0nkmaster/msteams-mcp))
+- **Install**: `npx -y @shayanline/msteams-mcp@latest` or clone the repo, `npm install && npm run build`, then point your MCP client to `dist/index.js`
 
 ## Project Overview
 
