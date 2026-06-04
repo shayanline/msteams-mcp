@@ -8,11 +8,10 @@ name: Publish to npm
 #     Repository:           msteams-mcp
 #     Workflow filename:    publish.yml
 #
-# The publishable package lives on the `published` branch (the fork's `main`
-# tracks upstream and is NOT publishable). This workflow only ever runs from
-# `published`: push a version tag cut from that branch to release, e.g.
-#   git checkout published && npm version patch && git push --follow-tags
-# or trigger it manually with "Run workflow" against the `published` branch.
+# `main` is the source of truth and the release branch. Release by pushing a
+# version tag cut from `main`, e.g.
+#   git checkout main && npm version patch && git push --follow-tags
+# or trigger it manually with "Run workflow" against `main`.
 
 on:
   push:
