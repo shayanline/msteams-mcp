@@ -8,15 +8,13 @@ name: Publish to npm
 #     Repository:           msteams-mcp
 #     Workflow filename:    publish.yml
 #
-# `main` is the source of truth and the release branch. Release by pushing a
-# version tag cut from `main`, e.g.
-#   git checkout main && npm version patch && git push --follow-tags
-# or trigger it manually with "Run workflow" against `main`.
+# `main` is the source of truth. Releases are cut from a published GitHub
+# Release (see RELEASING.md): bump the version, update CHANGELOG.md, then publish
+# a Release with tag v<version> targeting main. That triggers this workflow.
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
   workflow_dispatch:
 
 jobs:
