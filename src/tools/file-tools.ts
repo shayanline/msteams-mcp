@@ -109,13 +109,13 @@ const downloadFileToolDefinition: Tool = {
 
 const sendFileToolDefinition: Tool = {
   name: 'teams_send_file',
-  description: 'Send a local file into a Teams conversation. Uploads it to OneDrive, creates an organisation share link, and posts a message linking the file (Teams shows it as a file card) with an optional caption. Confirm the content with the user before sending.',
+  description: 'Send a local file into a Teams conversation as a native file attachment. This is the correct way to share a file: it posts a real file chiclet (icon, preview, open in Teams) that also appears in the conversation\'s Files tab, not just a link. The file is uploaded to the right place automatically: a channel\'s own SharePoint files folder for channels, or your OneDrive "Microsoft Teams Chat Files" (shared via an org link) for 1:1, group, meeting and self chats. Works for all conversation types. Add an optional caption as the message text. Confirm the content with the user before sending.',
   inputSchema: {
     type: 'object',
     properties: {
-      conversationId: { type: 'string', description: 'The conversation to send the file to (chat or channel).' },
+      conversationId: { type: 'string', description: 'The conversation to send the file to (1:1, group, meeting, self chat, or channel).' },
       localPath: { type: 'string', description: 'Absolute path to the local file to send.' },
-      caption: { type: 'string', description: 'Optional message text to include above the file.' },
+      caption: { type: 'string', description: 'Optional message text to send with the file.' },
     },
     required: ['conversationId', 'localPath'],
   },

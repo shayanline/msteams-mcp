@@ -133,6 +133,14 @@ export interface SendMessageOptions {
    * responsible for escaping any user text). Most callers should use `content`.
    */
   rawContentHtml?: string;
+  /**
+   * Native file attachments to post with the message. Each entry is a chatsvc
+   * file object (`http://schema.skype.com/File`). They are serialised into the
+   * message's `files` property so Teams renders a real file chiclet (with icon,
+   * name, preview and open-in-Teams) rather than a plain hyperlink, and the file
+   * appears in the conversation's Files tab. Built by `sendFileToChat`.
+   */
+  files?: Record<string, unknown>[];
 }
 
 /** Result of getting a 1:1 conversation. */
@@ -229,6 +237,11 @@ export async function sendMessage(
   }
   if (importance && importance !== 'normal') {
     properties.importance = importance;
+  }
+  // Native file attachments: serialised as a JSON string (like mentions), which
+  // makes Teams render a real file chiclet rather than a link.
+  if (options.files && options.files.length > 0) {
+    properties.files = JSON.stringify(options.files);
   }
   if (Object.keys(properties).length > 0) {
     body.properties = properties;
@@ -605,6 +618,46 @@ export async function deleteMessage(
 // ─────────────────────────────────────────────────────────────────────────────
 // Conversation Properties
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * For a channel conversation, resolves the host team's groupId (used as the
+ * Graph teamId) and the channel's SharePoint site URL from its threadProperties.
+ *
+ * Channels are the only conversation type whose files live in a team SharePoint
+ * library rather than the sender's OneDrive, so a native file send needs the
+ * groupId to locate the channel's files folder.
+ */
+export async function getChannelFilesInfo(
+  conversationId: string
+): Promise<Result<{ groupId: string; sharepointSiteUrl?: string }>> {
+  const authResult = requireMessageAuthWithConfig();
+  if (!authResult.ok) {
+    return authResult;
+  }
+  const { auth, region, baseUrl } = authResult.value;
+  const url = CHATSVC_API.conversation(region, conversationId, baseUrl) + '?view=msnp24Equivalent';
+
+  const response = await httpRequest<RawConversationResponse>(
+    url,
+    {
+      method: 'GET',
+      headers: getSkypeAuthHeaders(auth.skypeToken, auth.authToken, baseUrl),
+    }
+  );
+  if (!response.ok) {
+    return response;
+  }
+
+  const tp = (response.value.data.threadProperties ?? {}) as Record<string, unknown>;
+  const groupId = tp.groupId as string | undefined;
+  if (!groupId) {
+    return err(createError(
+      ErrorCode.API_ERROR,
+      "Could not resolve the channel's team (groupId) from its properties."
+    ));
+  }
+  return ok({ groupId, sharepointSiteUrl: tp.sharepointSiteUrl as string | undefined });
+}
 
 /**
  * Gets properties for a single conversation.

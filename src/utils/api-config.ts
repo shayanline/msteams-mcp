@@ -243,6 +243,29 @@ export const TAGS_API = {
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Channels API (middleTier)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Team channel management endpoints (middleTier), same mt/part region pattern as
+ * Tags/Calendar. Note the path segment is the team's ROOT thread id
+ * (19:...@thread.tacv2), not the group GUID; the group GUID goes in the body.
+ */
+export const CHANNELS_API = {
+  /** Create a channel in a team (POST). */
+  createChannel: (regionPartition: string, hasPartition: boolean, teamThreadId: string, baseUrl = DEFAULT_TEAMS_BASE_URL) =>
+    hasPartition
+      ? `${baseUrl}/api/mt/part/${regionPartition}/beta/teams/${encodeURIComponent(teamThreadId)}/channels`
+      : `${baseUrl}/api/mt/${regionPartition}/beta/teams/${encodeURIComponent(teamThreadId)}/channels`,
+
+  /** A single channel within a team (DELETE to remove it). */
+  channel: (regionPartition: string, hasPartition: boolean, teamThreadId: string, channelId: string, baseUrl = DEFAULT_TEAMS_BASE_URL) =>
+    hasPartition
+      ? `${baseUrl}/api/mt/part/${regionPartition}/beta/teams/${encodeURIComponent(teamThreadId)}/channels/${encodeURIComponent(channelId)}`
+      : `${baseUrl}/api/mt/${regionPartition}/beta/teams/${encodeURIComponent(teamThreadId)}/channels/${encodeURIComponent(channelId)}`,
+} as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // CSA API
 // ─────────────────────────────────────────────────────────────────────────────
 
