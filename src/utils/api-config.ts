@@ -257,6 +257,12 @@ export const CHANNELS_API = {
     hasPartition
       ? `${baseUrl}/api/mt/part/${regionPartition}/beta/teams/${encodeURIComponent(teamThreadId)}/channels`
       : `${baseUrl}/api/mt/${regionPartition}/beta/teams/${encodeURIComponent(teamThreadId)}/channels`,
+
+  /** A single channel within a team (DELETE to remove it). */
+  channel: (regionPartition: string, hasPartition: boolean, teamThreadId: string, channelId: string, baseUrl = DEFAULT_TEAMS_BASE_URL) =>
+    hasPartition
+      ? `${baseUrl}/api/mt/part/${regionPartition}/beta/teams/${encodeURIComponent(teamThreadId)}/channels/${encodeURIComponent(channelId)}`
+      : `${baseUrl}/api/mt/${regionPartition}/beta/teams/${encodeURIComponent(teamThreadId)}/channels/${encodeURIComponent(channelId)}`,
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────

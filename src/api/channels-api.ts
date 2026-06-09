@@ -24,6 +24,36 @@ export interface CreateChannelResult {
   membershipType: 'standard' | 'private';
 }
 
+/** Result of deleting a channel. */
+export interface DeleteChannelResult {
+  /** The deleted channel's conversation ID. */
+  conversationId: string;
+  /** The host team's group ID (GUID). */
+  teamId: string;
+}
+
+/**
+ * Resolves a team from a group GUID or team thread id to the identifiers the
+ * mt/part channel endpoints need: the team root thread id (URL path) and the
+ * group GUID (request body). The teams list exposes the thread id at team level
+ * and the group GUID on each channel.
+ */
+async function resolveTeam(teamId: string): Promise<Result<{ threadId: string; groupId: string }>> {
+  const teamsList = await getMyTeamsAndChannels();
+  if (!teamsList.ok) return teamsList;
+  const team = teamsList.value.teams.find(t =>
+    t.threadId === teamId || t.teamId === teamId || t.channels.some(c => c.teamId === teamId)
+  );
+  if (!team) {
+    return err(createError(
+      ErrorCode.NOT_FOUND,
+      `You are not a member of a team identified by "${teamId}", or it could not be found.`,
+      { suggestions: ['Use teams_find_channel to get the correct teamId (group ID)'] }
+    ));
+  }
+  return ok({ threadId: team.threadId, groupId: team.channels.find(c => c.teamId)?.teamId || teamId });
+}
+
 /**
  * Creates a channel in a team.
  *
@@ -54,29 +84,15 @@ export async function createChannel(
   }
 
   // The create-channel URL keys on the team's root thread id, while the body
-  // needs the group GUID. The teams list exposes the thread id at team level and
-  // the group GUID on each channel, so match on either to support being given a
-  // group GUID (from teams_find_channel) or a team thread id.
-  const teamsList = await getMyTeamsAndChannels();
-  if (!teamsList.ok) {
-    return teamsList;
-  }
-  const team = teamsList.value.teams.find(t =>
-    t.threadId === teamId || t.teamId === teamId || t.channels.some(c => c.teamId === teamId)
-  );
-  if (!team) {
-    return err(createError(
-      ErrorCode.NOT_FOUND,
-      `You are not a member of a team identified by "${teamId}", or it could not be found.`,
-      { suggestions: ['Use teams_find_channel to get the correct teamId (group ID)'] }
-    ));
-  }
-  const groupId = team.channels.find(c => c.teamId)?.teamId || teamId;
+  // needs the group GUID.
+  const resolved = await resolveTeam(teamId);
+  if (!resolved.ok) return resolved;
+  const { threadId, groupId } = resolved.value;
 
   const url = CHANNELS_API.createChannel(
     regionConfig.regionPartition,
     regionConfig.hasPartition,
-    team.threadId,
+    threadId,
     regionConfig.teamsBaseUrl
   );
 
@@ -112,4 +128,55 @@ export async function createChannel(
     teamId: groupId,
     membershipType,
   });
+}
+
+/**
+ * Deletes a channel from a team.
+ *
+ * @param teamId - The host team's group ID (GUID), as returned by teams_find_channel.
+ * @param channelId - The channel's conversation ID (19:...@thread.tacv2).
+ */
+export async function deleteChannel(
+  teamId: string,
+  channelId: string
+): Promise<Result<DeleteChannelResult>> {
+  const authResult = requireSkypeSpacesAuth();
+  if (!authResult.ok) {
+    return authResult;
+  }
+  const { skypeToken, spacesToken } = authResult.value;
+
+  const regionConfig = getRegionConfig();
+  if (!regionConfig) {
+    return err(createError(
+      ErrorCode.AUTH_REQUIRED,
+      'Could not determine region. Please run teams_login to authenticate.',
+      { suggestions: ['Call teams_login to authenticate'] }
+    ));
+  }
+
+  const resolved = await resolveTeam(teamId);
+  if (!resolved.ok) return resolved;
+
+  const url = CHANNELS_API.channel(
+    regionConfig.regionPartition,
+    regionConfig.hasPartition,
+    resolved.value.threadId,
+    channelId,
+    regionConfig.teamsBaseUrl
+  );
+
+  const response = await httpRequest<unknown>(
+    url,
+    {
+      method: 'DELETE',
+      headers: getSkypeAuthHeaders(skypeToken, spacesToken, regionConfig.teamsBaseUrl),
+    }
+  );
+
+  if (!response.ok) {
+    return response;
+  }
+
+  return ok({ conversationId: channelId, teamId: resolved.value.groupId });
 }

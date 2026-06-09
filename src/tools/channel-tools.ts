@@ -5,7 +5,7 @@
 import { z } from 'zod';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { RegisteredTool, ToolContext, ToolResult } from './index.js';
-import { createChannel } from '../api/channels-api.js';
+import { createChannel, deleteChannel } from '../api/channels-api.js';
 import { handleApiResult } from './index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -17,6 +17,11 @@ export const CreateChannelInputSchema = z.object({
   displayName: z.string().min(1).max(50),
   description: z.string().optional(),
   membershipType: z.enum(['standard', 'private']).optional().default('standard'),
+});
+
+export const DeleteChannelInputSchema = z.object({
+  teamId: z.string().min(1, 'Team ID cannot be empty'),
+  channelId: z.string().min(1, 'Channel ID cannot be empty'),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -51,6 +56,25 @@ const createChannelDefinition: Tool = {
   },
 };
 
+const deleteChannelDefinition: Tool = {
+  name: 'teams_delete_channel',
+  description: 'Delete a channel from a Teams team. Provide the team\'s group ID (teamId, from teams_find_channel) and the channel\'s conversationId. This permanently removes the channel and its content for everyone, so confirm with the user before deleting. The team\'s General channel cannot be deleted.',
+  inputSchema: {
+    type: 'object' as const,
+    properties: {
+      teamId: {
+        type: 'string',
+        description: 'The team group ID (GUID). Get this from teams_find_channel results (teamId field).',
+      },
+      channelId: {
+        type: 'string',
+        description: 'The channel conversation ID to delete (19:...@thread.tacv2).',
+      },
+    },
+    required: ['teamId', 'channelId'],
+  },
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Handlers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -67,6 +91,18 @@ async function handleCreateChannel(
   }));
 }
 
+async function handleDeleteChannel(
+  input: z.infer<typeof DeleteChannelInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  const result = await deleteChannel(input.teamId, input.channelId);
+  return handleApiResult(result, (value) => ({
+    success: true,
+    ...value,
+    message: 'Channel deleted.',
+  }));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Registration
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,4 +113,10 @@ const createChannelTool: RegisteredTool<typeof CreateChannelInputSchema> = {
   handler: handleCreateChannel,
 };
 
-export const channelTools = [createChannelTool];
+const deleteChannelTool: RegisteredTool<typeof DeleteChannelInputSchema> = {
+  definition: deleteChannelDefinition,
+  schema: DeleteChannelInputSchema,
+  handler: handleDeleteChannel,
+};
+
+export const channelTools = [createChannelTool, deleteChannelTool];

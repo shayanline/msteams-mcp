@@ -203,6 +203,7 @@ Session state and token cache files are protected by:
 | `teams_get_chat` | Get conversation ID for 1:1 chat with a person |
 | `teams_create_group_chat` | Create a new group chat with multiple people |
 | `teams_create_channel` | Create a channel in a team (`teamId` group ID from `teams_find_channel`); standard or private |
+| `teams_delete_channel` | Delete a channel from a team (`teamId` + channel `conversationId`); permanent, General cannot be deleted |
 | `teams_edit_message` | Edit one of your own messages (same markdown and @mentions as send) |
 | `teams_delete_message` | Delete one of your own messages (soft delete) |
 | `teams_get_unread` | Without `conversationId`: bulk unread across recent conversations (up to 200); with `conversationId`: unread count for that chat/channel |

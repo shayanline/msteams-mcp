@@ -12,7 +12,7 @@ vi.mock('./csa-api.js', () => ({ getMyTeamsAndChannels: vi.fn() }));
 import { httpRequest } from '../utils/http.js';
 import { requireSkypeSpacesAuth, getRegionConfig } from '../utils/auth-guards.js';
 import { getMyTeamsAndChannels } from './csa-api.js';
-import { createChannel } from './channels-api.js';
+import { createChannel, deleteChannel } from './channels-api.js';
 
 const mockHttp = vi.mocked(httpRequest);
 const mockAuth = vi.mocked(requireSkypeSpacesAuth);
@@ -88,6 +88,42 @@ describe('createChannel', () => {
   it('propagates an http failure', async () => {
     mockHttp.mockResolvedValueOnce(err(createError(ErrorCode.NETWORK_ERROR, 'boom')) as never);
     const res = await createChannel('GROUP-GUID', 'New');
+    expect(res.ok).toBe(false);
+  });
+});
+
+describe('deleteChannel', () => {
+  it('propagates an auth failure without calling http', async () => {
+    mockAuth.mockReturnValue(err(createError(ErrorCode.AUTH_REQUIRED, 'no auth')) as never);
+    const res = await deleteChannel('GROUP-GUID', '19:chan@thread.tacv2');
+    expect(res.ok).toBe(false);
+    expect(mockHttp).not.toHaveBeenCalled();
+  });
+
+  it('fails when the team cannot be found', async () => {
+    mockTeams.mockResolvedValue(ok({ teams: [] }) as never);
+    const res = await deleteChannel('GROUP-GUID', '19:chan@thread.tacv2');
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error.code).toBe(ErrorCode.NOT_FOUND);
+    expect(mockHttp).not.toHaveBeenCalled();
+  });
+
+  it('sends a DELETE to the channel URL keyed on the team root thread id', async () => {
+    mockHttp.mockResolvedValueOnce(httpOk({}));
+    const res = await deleteChannel('GROUP-GUID', '19:chan@thread.tacv2');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value).toEqual({ conversationId: '19:chan@thread.tacv2', teamId: 'GROUP-GUID' });
+
+    const [url, options] = mockHttp.mock.calls[0] as [string, { method: string }];
+    expect(options.method).toBe('DELETE');
+    expect(url).toContain('/beta/teams/19%3Aroot%40thread.tacv2/channels/19%3Achan%40thread.tacv2');
+  });
+
+  it('propagates an http failure', async () => {
+    mockHttp.mockResolvedValueOnce(err(createError(ErrorCode.NETWORK_ERROR, 'boom')) as never);
+    const res = await deleteChannel('GROUP-GUID', '19:chan@thread.tacv2');
     expect(res.ok).toBe(false);
   });
 });

@@ -131,6 +131,7 @@ The server uses your system's Chrome (macOS/Linux) or Edge (Windows) for authent
 | `teams_remove_member` | Remove a person from a group chat |
 | `teams_leave_chat` | Leave a group chat |
 | `teams_create_channel` | Create a new channel in a team (standard or private) |
+| `teams_delete_channel` | Delete a channel from a team (permanent; General cannot be deleted) |
 | `teams_pin_message` | Pin a message in a conversation |
 | `teams_unpin_message` | Clear pinned messages in a conversation |
 | `teams_mute_chat` | Mute a conversation (notifications off) |
