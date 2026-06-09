@@ -3,20 +3,27 @@ import { ok } from '../types/result.js';
 
 vi.mock('../utils/http.js', () => ({ httpRequest: vi.fn() }));
 vi.mock('../utils/auth-guards.js', () => ({ requireGraphAuth: vi.fn() }));
-vi.mock('./chatsvc-messaging.js', () => ({ sendMessage: vi.fn() }));
+vi.mock('./chatsvc-messaging.js', () => ({ sendMessage: vi.fn(), getChannelFilesInfo: vi.fn() }));
 vi.mock('node:fs/promises', () => ({ readFile: vi.fn(), writeFile: vi.fn() }));
 
 import { httpRequest } from '../utils/http.js';
 import { requireGraphAuth } from '../utils/auth-guards.js';
-import { sendMessage } from './chatsvc-messaging.js';
+import { sendMessage, getChannelFilesInfo } from './chatsvc-messaging.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import { listDriveFiles, uploadFile, downloadFile, createShareLink, sendFileToChat } from './files-graph-api.js';
 
 const mockHttp = vi.mocked(httpRequest);
 const mockAuth = vi.mocked(requireGraphAuth);
 const mockSend = vi.mocked(sendMessage);
+const mockChannelInfo = vi.mocked(getChannelFilesInfo);
 const mockRead = vi.mocked(readFile);
 const mockWrite = vi.mocked(writeFile);
+
+/** A drive item GET response shaped for getShareFileInfo (sharepointIds + webUrl). */
+const shareInfoResponse = (webUrl: string) => httpOk({
+  id: 'item1', name: 'report.pdf', webUrl,
+  sharepointIds: { listItemUniqueId: 'LIU-GUID', siteId: 'SITE-GUID' },
+});
 const httpOk = (data: unknown) => ok({ status: 200, headers: new Headers(), data } as never);
 
 beforeEach(() => {
@@ -107,33 +114,45 @@ describe('createShareLink', () => {
   });
 });
 
-describe('sendFileToChat', () => {
-  it('uploads, shares, and posts a message linking the file', async () => {
+describe('sendFileToChat (chat conversations)', () => {
+  it('uploads to OneDrive, shares, and posts a native file attachment', async () => {
     mockRead.mockResolvedValueOnce(Buffer.from('hi'));
     mockHttp
-      .mockResolvedValueOnce(httpOk({ id: '01X', name: 'report.pdf' }))      // upload
-      .mockResolvedValueOnce(httpOk({ link: { webUrl: 'https://share/r' } })); // createLink
+      .mockResolvedValueOnce(httpOk({ id: '01X', name: 'report.pdf' }))                          // upload (PUT)
+      .mockResolvedValueOnce(httpOk({ link: { webUrl: 'https://share/r' } }))                    // createShareLink
+      .mockResolvedValueOnce(shareInfoResponse('https://t-my.sharepoint.com/personal/u/Documents/Microsoft%20Teams%20Chat%20Files/report.pdf')); // getShareFileInfo
     mockSend.mockResolvedValueOnce(ok({ messageId: 'm', timestamp: 1 }) as never);
+
     const res = await sendFileToChat('48:notes', '/tmp/report.pdf', 'see this');
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    expect(res.value).toMatchObject({ conversationId: '48:notes', fileName: 'report.pdf', webUrl: 'https://share/r' });
-    const [conv, content] = mockSend.mock.calls[0] as [string, string];
+    expect(res.value).toMatchObject({ conversationId: '48:notes', fileName: 'report.pdf', webUrl: 'https://share/r', messageId: 'm' });
+
+    const [conv, content, options] = mockSend.mock.calls[0] as [string, string, { files?: Record<string, unknown>[] }];
     expect(conv).toBe('48:notes');
-    expect(content).toContain('[report.pdf](https://share/r)');
-    expect(content).toContain('see this');
+    expect(content).toBe('see this'); // caption is the message text; the file rides in the files property
+    expect(options.files).toHaveLength(1);
+    expect(options.files![0]).toMatchObject({
+      '@type': 'http://schema.skype.com/File',
+      title: 'report.pdf',
+      id: 'LIU-GUID',
+      objectUrl: expect.stringContaining('report.pdf'),
+    });
   });
 
-  it('posts without a caption when none is given', async () => {
+  it('posts with an empty caption when none is given', async () => {
     mockRead.mockResolvedValueOnce(Buffer.from('hi'));
     mockHttp
       .mockResolvedValueOnce(httpOk({ id: '01X', name: 'report.pdf' }))
-      .mockResolvedValueOnce(httpOk({ link: { webUrl: 'https://share/r' } }));
+      .mockResolvedValueOnce(httpOk({ link: { webUrl: 'https://share/r' } }))
+      .mockResolvedValueOnce(shareInfoResponse('https://t-my.sharepoint.com/personal/u/Documents/report.pdf'));
     mockSend.mockResolvedValueOnce(ok({ messageId: 'm', timestamp: 1 }) as never);
+
     const res = await sendFileToChat('48:notes', '/tmp/report.pdf');
     expect(res.ok).toBe(true);
-    const [, content] = mockSend.mock.calls[0] as [string, string];
-    expect(content).toBe('[report.pdf](https://share/r)');
+    const [, content, options] = mockSend.mock.calls[0] as [string, string, { files?: unknown[] }];
+    expect(content).toBe('');
+    expect(options.files).toHaveLength(1);
   });
 
   it('returns the upload error when uploading fails', async () => {
@@ -157,10 +176,41 @@ describe('sendFileToChat', () => {
     mockRead.mockResolvedValueOnce(Buffer.from('hi'));
     mockHttp
       .mockResolvedValueOnce(httpOk({ id: '01X', name: 'report.pdf' }))
-      .mockResolvedValueOnce(httpOk({ link: { webUrl: 'https://share/r' } }));
+      .mockResolvedValueOnce(httpOk({ link: { webUrl: 'https://share/r' } }))
+      .mockResolvedValueOnce(shareInfoResponse('https://t-my.sharepoint.com/personal/u/Documents/report.pdf'));
     mockSend.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
     const res = await sendFileToChat('48:notes', '/tmp/report.pdf');
     expect(res.ok).toBe(false);
+  });
+});
+
+describe('sendFileToChat (channel conversations)', () => {
+  it('uploads into the channel SharePoint library and posts a native attachment (no org link)', async () => {
+    mockChannelInfo.mockResolvedValueOnce(ok({ groupId: 'GID', sharepointSiteUrl: 'https://t.sharepoint.com/teams/X' }) as never);
+    mockRead.mockResolvedValueOnce(Buffer.from('hi'));
+    mockHttp
+      .mockResolvedValueOnce(httpOk({ id: 'folder', parentReference: { driveId: 'drv' } }))        // getChannelFilesFolder
+      .mockResolvedValueOnce(httpOk({ id: 'item1', name: 'report.pdf', webUrl: 'x' }))              // uploadFileToDriveFolder (PUT)
+      .mockResolvedValueOnce(shareInfoResponse('https://t.sharepoint.com/teams/X/Shared%20Documents/Chan/report.pdf')); // getShareFileInfo(driveId)
+    mockSend.mockResolvedValueOnce(ok({ messageId: 'm', timestamp: 1 }) as never);
+
+    const res = await sendFileToChat('19:abc@thread.tacv2', '/tmp/report.pdf', 'cap');
+    expect(res.ok).toBe(true);
+    // folder lookup + upload + share-info = 3 calls; channels skip the org share link.
+    expect(mockHttp).toHaveBeenCalledTimes(3);
+    expect(mockHttp.mock.calls[2][0]).toContain('/drives/drv/items/');
+
+    const [conv, content, options] = mockSend.mock.calls[0] as [string, string, { files?: Record<string, unknown>[] }];
+    expect(conv).toBe('19:abc@thread.tacv2');
+    expect(content).toBe('cap');
+    expect(options.files![0].objectUrl).toContain('/teams/X/');
+  });
+
+  it('returns the channel-info error when the team cannot be resolved', async () => {
+    mockChannelInfo.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
+    const res = await sendFileToChat('19:abc@thread.tacv2', '/tmp/report.pdf');
+    expect(res.ok).toBe(false);
+    expect(mockSend).not.toHaveBeenCalled();
   });
 });
 

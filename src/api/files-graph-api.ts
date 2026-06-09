@@ -13,7 +13,8 @@ import { GRAPH_BASE_URL } from '../utils/api-config.js';
 import { type Result, ok, err } from '../types/result.js';
 import { ErrorCode, createError } from '../types/errors.js';
 import { requireGraphAuth } from '../utils/auth-guards.js';
-import { sendMessage } from './chatsvc-messaging.js';
+import { sendMessage, getChannelFilesInfo } from './chatsvc-messaging.js';
+import { getConversationType } from '../utils/parsers.js';
 
 const GRAPH_UPLOAD_MAX = 250 * 1024 * 1024; // simple upload supports up to 250 MB
 
@@ -122,27 +123,235 @@ export async function createShareLink(
   return ok({ webUrl: link.webUrl });
 }
 
+/** SharePoint identifiers needed to build a native Teams file chiclet. */
+interface ShareFileInfo {
+  /** SharePoint listItemUniqueId GUID (the chiclet's file id). */
+  itemId: string;
+  fileName: string;
+  /** Lowercase extension without the dot, e.g. "zip", "docx". */
+  fileType: string;
+  /** Absolute SharePoint URL to the file (webUrl). */
+  objectUrl: string;
+  /** SharePoint site collection base URL, with a trailing slash. */
+  baseUrl: string;
+  /** SharePoint site GUID (sharepointIds.siteId). */
+  siteId: string;
+}
+
 /**
- * Sends a file into a Teams conversation: uploads it to OneDrive (Teams chat
- * files area), creates an org edit link, and posts a message with the file
- * linked by name plus an optional caption. Teams renders the SharePoint link as
- * a file card.
+ * Derives the SharePoint site base URL (with trailing slash) for a file. Teams
+ * keys the chiclet's baseUrl on the site root, not the file path. Prefers the
+ * site URL reported in sharepointIds, otherwise trims the file's webUrl at the
+ * document library (OneDrive uses "Documents", team sites use "Shared
+ * Documents").
+ */
+function deriveSiteBaseUrl(webUrl: string, sharepointSiteUrl?: string): string {
+  if (sharepointSiteUrl) {
+    return sharepointSiteUrl.endsWith('/') ? sharepointSiteUrl : `${sharepointSiteUrl}/`;
+  }
+  for (const marker of ['/Shared%20Documents/', '/Shared Documents/', '/Documents/']) {
+    const idx = webUrl.indexOf(marker);
+    if (idx > 0) return webUrl.slice(0, idx + 1);
+  }
+  return '';
+}
+
+/**
+ * Fetches the SharePoint identifiers for an uploaded drive item that Teams needs
+ * to render a native file chiclet. `sharepointIds.listItemUniqueId` is the id
+ * Teams keys the file on, and `webUrl` is the openable SharePoint URL. Pass a
+ * `driveId` for items in a team/channel library (otherwise the user's drive).
+ */
+async function getShareFileInfo(driveItemId: string, driveId?: string): Promise<Result<ShareFileInfo>> {
+  const auth = requireGraphAuth();
+  if (!auth.ok) return auth;
+
+  const itemPath = driveId
+    ? `/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(driveItemId)}`
+    : `/me/drive/items/${encodeURIComponent(driveItemId)}`;
+
+  const response = await httpRequest<Record<string, unknown>>(
+    `${GRAPH_BASE_URL}${itemPath}?$select=id,name,webUrl,sharepointIds`,
+    { method: 'GET', headers: { ...bearer(auth.value), Accept: 'application/json' } }
+  );
+  if (!response.ok) return response;
+
+  const item = response.value.data;
+  const sp = (item.sharepointIds ?? {}) as Record<string, unknown>;
+  const name = (item.name as string) ?? 'file';
+  const dot = name.lastIndexOf('.');
+  const fileType = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+  const objectUrl = (item.webUrl as string) || '';
+
+  return ok({
+    itemId: (sp.listItemUniqueId as string) || (item.id as string),
+    fileName: name,
+    fileType,
+    objectUrl,
+    baseUrl: deriveSiteBaseUrl(objectUrl, sp.siteUrl as string | undefined),
+    siteId: (sp.siteId as string) || '',
+  });
+}
+
+/** A channel's files folder location in its team SharePoint library. */
+interface ChannelFilesFolder {
+  driveId: string;
+  folderId: string;
+}
+
+/**
+ * Resolves a channel's files folder (drive id + folder item id) via Graph, so a
+ * file can be uploaded into the channel's own SharePoint library rather than the
+ * sender's OneDrive.
+ */
+async function getChannelFilesFolder(groupId: string, channelId: string): Promise<Result<ChannelFilesFolder>> {
+  const auth = requireGraphAuth();
+  if (!auth.ok) return auth;
+
+  const response = await httpRequest<Record<string, unknown>>(
+    `${GRAPH_BASE_URL}/teams/${encodeURIComponent(groupId)}/channels/${encodeURIComponent(channelId)}/filesFolder?$select=id,parentReference`,
+    { method: 'GET', headers: { ...bearer(auth.value), Accept: 'application/json' } }
+  );
+  if (!response.ok) return response;
+
+  const folder = response.value.data;
+  const parent = (folder.parentReference ?? {}) as Record<string, unknown>;
+  const driveId = parent.driveId as string | undefined;
+  const folderId = folder.id as string | undefined;
+  if (!driveId || !folderId) {
+    return err(createError(ErrorCode.API_ERROR, "Could not resolve the channel's files folder."));
+  }
+  return ok({ driveId, folderId });
+}
+
+/** Uploads a local file into a specific drive folder (used for channel libraries). */
+async function uploadFileToDriveFolder(
+  driveId: string,
+  folderId: string,
+  localPath: string
+): Promise<Result<DriveItem>> {
+  const auth = requireGraphAuth();
+  if (!auth.ok) return auth;
+
+  let data: Buffer;
+  try {
+    data = await readFile(localPath);
+  } catch {
+    return err(createError(ErrorCode.INVALID_INPUT, `Could not read file: ${localPath}`));
+  }
+  if (data.length > GRAPH_UPLOAD_MAX) {
+    return err(createError(ErrorCode.INVALID_INPUT, 'File exceeds the 250 MB upload limit.'));
+  }
+
+  const name = basename(localPath);
+  const response = await httpRequest<Record<string, unknown>>(
+    `${GRAPH_BASE_URL}/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(folderId)}:/${encodeURIComponent(name)}:/content`,
+    { method: 'PUT', headers: { ...bearer(auth.value), 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(data) }
+  );
+  if (!response.ok) return response;
+  return ok(parseItem(response.value.data));
+}
+
+/**
+ * Builds a chatsvc file object (`http://schema.skype.com/File`) describing a
+ * SharePoint-hosted file. Serialised into the message's `files` property, this
+ * is what makes Teams render a native file chiclet. The shape mirrors what the
+ * Teams web client posts for a shared document (image-only fields like
+ * amsreferences/filePreview are omitted).
+ */
+function buildFileProperty(info: ShareFileInfo, shareUrl: string): Record<string, unknown> {
+  return {
+    '@type': 'http://schema.skype.com/File',
+    version: 2,
+    id: info.itemId,
+    baseUrl: info.baseUrl,
+    type: info.fileType,
+    title: info.fileName,
+    state: 'active',
+    objectUrl: info.objectUrl,
+    providerData: '',
+    itemid: info.itemId,
+    fileName: info.fileName,
+    fileType: info.fileType,
+    fileInfo: {
+      itemId: null,
+      fileUrl: info.objectUrl,
+      siteUrl: info.baseUrl,
+      serverRelativeUrl: '',
+      shareUrl,
+      shareId: '',
+    },
+    chicletBreadcrumbs: null,
+    botFileProperties: {},
+    isUploadError: null,
+    progressComplete: null,
+    permissionScope: 'users',
+    filePreview: null,
+    sharepointIds: {
+      listId: null,
+      listItemUniqueId: info.itemId,
+      siteId: info.siteId || null,
+      siteUrl: null,
+      webId: null,
+    },
+    publication: null,
+    site: null,
+    fileChicletState: { serviceName: 'p2p', state: 'active' },
+  };
+}
+
+/**
+ * Sends a file into a Teams conversation as a native attachment: it posts a
+ * message carrying the file in its `files` property so Teams shows a real file
+ * chiclet (and lists it in the Files tab), with an optional caption as the text.
+ *
+ * The file is uploaded to the correct place for the conversation type, matching
+ * what the Teams client itself does:
+ * - **Channels**: the channel's own SharePoint files folder (so it appears in the
+ *   channel Files tab); channel members already have access.
+ * - **Chats** (1:1, group, meeting, self): the sender's OneDrive "Microsoft Teams
+ *   Chat Files", shared with the conversation via an org link.
  */
 export async function sendFileToChat(
   conversationId: string,
   localPath: string,
   caption?: string
-): Promise<Result<{ conversationId: string; fileName: string; webUrl: string }>> {
-  const uploaded = await uploadFile(localPath, 'Microsoft Teams Chat Files');
-  if (!uploaded.ok) return uploaded;
+): Promise<Result<{ conversationId: string; fileName: string; webUrl: string; messageId: string }>> {
+  const isChannel = getConversationType(conversationId) === 'channel';
 
-  const link = await createShareLink(uploaded.value.id, 'edit');
-  if (!link.ok) return link;
+  let info: Result<ShareFileInfo>;
+  let webUrl: string;
+  let shareUrl: string;
 
-  const intro = caption ? `${caption}\n\n` : '';
-  const content = `${intro}[${uploaded.value.name}](${link.value.webUrl})`;
-  const sent = await sendMessage(conversationId, content);
+  if (isChannel) {
+    // Upload into the channel's SharePoint library; members already have access.
+    const channel = await getChannelFilesInfo(conversationId);
+    if (!channel.ok) return channel;
+    const folder = await getChannelFilesFolder(channel.value.groupId, conversationId);
+    if (!folder.ok) return folder;
+    const uploaded = await uploadFileToDriveFolder(folder.value.driveId, folder.value.folderId, localPath);
+    if (!uploaded.ok) return uploaded;
+
+    info = await getShareFileInfo(uploaded.value.id, folder.value.driveId);
+    webUrl = uploaded.value.webUrl ?? '';
+    shareUrl = '';
+  } else {
+    // Upload to the user's OneDrive chat-files area and grant access via an org link.
+    const uploaded = await uploadFile(localPath, 'Microsoft Teams Chat Files');
+    if (!uploaded.ok) return uploaded;
+    const link = await createShareLink(uploaded.value.id, 'edit');
+    if (!link.ok) return link;
+
+    info = await getShareFileInfo(uploaded.value.id);
+    webUrl = link.value.webUrl;
+    shareUrl = link.value.webUrl;
+  }
+
+  if (!info.ok) return info;
+
+  const fileProperty = buildFileProperty(info.value, shareUrl);
+  const sent = await sendMessage(conversationId, caption ?? '', { files: [fileProperty] });
   if (!sent.ok) return sent;
 
-  return ok({ conversationId, fileName: uploaded.value.name, webUrl: link.value.webUrl });
+  return ok({ conversationId, fileName: info.value.fileName, webUrl, messageId: sent.value.messageId });
 }

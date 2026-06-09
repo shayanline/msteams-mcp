@@ -24,6 +24,7 @@ import { meetingTools } from './meeting-tools.js';
 import { fileTools } from './file-tools.js';
 import { tagTools } from './tag-tools.js';
 import { taskTools } from './task-tools.js';
+import { channelTools } from './channel-tools.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Registry
@@ -39,6 +40,7 @@ const allTools: RegistryEntry[] = [
   ...fileTools,
   ...tagTools,
   ...taskTools,
+  ...channelTools,
 ];
 
 /** Lookup map for tools by name. */
