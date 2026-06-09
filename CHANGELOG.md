@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-06-09
+
+### Added
+- `teams_send_file` now sends a **native file attachment** (a real file chiclet that also shows in the conversation's Files tab) instead of posting a share link. The file is uploaded to the right place per conversation type, matching the Teams client: a channel's own SharePoint files folder for channels, or OneDrive "Microsoft Teams Chat Files" (shared via an organisation link) for 1:1, group, meeting and self chats.
+- `teams_create_channel` and `teams_delete_channel` to create and delete team channels (standard or private) via the middle-tier API.
+
 ## [0.25.1] - 2026-06-04
 
 ### Changed
@@ -28,6 +34,7 @@ All notable changes to this project are documented here. The format is based on
 
 See the [GitHub releases](https://github.com/shayanline/msteams-mcp/releases) for the history before independent maintenance began.
 
-[Unreleased]: https://github.com/shayanline/msteams-mcp/compare/v0.25.1...HEAD
+[Unreleased]: https://github.com/shayanline/msteams-mcp/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/shayanline/msteams-mcp/compare/v0.25.1...v0.26.0
 [0.25.1]: https://github.com/shayanline/msteams-mcp/compare/v0.25.0...v0.25.1
 [0.25.0]: https://github.com/shayanline/msteams-mcp/compare/v0.24.1...v0.25.0

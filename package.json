@@ -1,6 +1,6 @@
 {
   "name": "@shayanline/msteams-mcp",
-  "version": "0.25.1",
+  "version": "0.26.0",
   "description": "MCP server for Microsoft Teams (search, send, reply, calendar, presence). Enhanced fork of m0nkmaster/msteams-mcp.",
   "type": "module",
   "main": "dist/index.js",
