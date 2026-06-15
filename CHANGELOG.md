@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-06-15
+
 ### Fixed
 - Markdown to Teams HTML: a list, blockquote or table now renders correctly when it immediately follows a text line within the same block (e.g. a `Label:` line directly above `- bullets`), without needing a separating blank line. The converter previously required every line in a block to share one type, so a label plus a list fell back to a single `<br>`-joined paragraph and the bullets did not render. Blocks are now parsed by grouping consecutive line runs, letting block elements interrupt a paragraph as standard markdown allows.
 
