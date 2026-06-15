@@ -858,6 +858,49 @@ describe('markdownToTeamsHtml', () => {
     );
   });
 
+  it('lets an unordered list interrupt a paragraph without a blank line', () => {
+    expect(markdownToTeamsHtml('Last Friday:\n- Item 1\n- Item 2')).toBe(
+      '<p>Last Friday:</p><ul><li>Item 1</li><li>Item 2</li></ul>'
+    );
+  });
+
+  it('lets an ordered list interrupt a paragraph without a blank line', () => {
+    expect(markdownToTeamsHtml('Steps:\n1. First\n2. Second')).toBe(
+      '<p>Steps:</p><ol><li>First</li><li>Second</li></ol>'
+    );
+  });
+
+  it('renders a bold label followed immediately by a list', () => {
+    expect(markdownToTeamsHtml('**Today:**\n- Ship it')).toBe(
+      '<p><b>Today:</b></p><ul><li>Ship it</li></ul>'
+    );
+  });
+
+  it('renders text after a list within the same block', () => {
+    expect(markdownToTeamsHtml('- Item 1\n- Item 2\nWrap up')).toBe(
+      '<ul><li>Item 1</li><li>Item 2</li></ul><p>Wrap up</p>'
+    );
+  });
+
+  it('handles multiple labelled lists in one block', () => {
+    expect(markdownToTeamsHtml('Done:\n- A\nTodo:\n- B')).toBe(
+      '<p>Done:</p><ul><li>A</li></ul><p>Todo:</p><ul><li>B</li></ul>'
+    );
+  });
+
+  it('lets a blockquote interrupt a paragraph without a blank line', () => {
+    expect(markdownToTeamsHtml('Note:\n> be careful')).toBe(
+      '<p>Note:</p><blockquote>be careful</blockquote>'
+    );
+  });
+
+  it('renders a table that immediately follows a label line', () => {
+    expect(markdownToTeamsHtml('Scores:\n| A | B |\n| --- | --- |\n| 1 | 2 |')).toBe(
+      '<p>Scores:</p><table><thead><tr><th>A</th><th>B</th></tr></thead>' +
+        '<tbody><tr><td>1</td><td>2</td></tr></tbody></table>'
+    );
+  });
+
   it('returns empty paragraph for empty string', () => {
     expect(markdownToTeamsHtml('')).toBe('<p></p>');
   });

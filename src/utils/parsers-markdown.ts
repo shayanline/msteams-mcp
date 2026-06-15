@@ -42,6 +42,13 @@ function convertInlineFormatting(line: string): string {
 }
 
 /**
+ * Matches a markdown table separator row, e.g. `| --- | :---: |`.
+ */
+function isTableSeparator(line: string): boolean {
+  return /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line);
+}
+
+/**
  * Converts a markdown pipe table (header row, a separator row of dashes, then
  * body rows) into a Teams HTML <table>.
  */
@@ -55,6 +62,94 @@ function buildTableHtml(lines: string[]): string {
     .map(l => `<tr>${parseRow(l).map(c => `<td>${convertInlineFormatting(c)}</td>`).join('')}</tr>`)
     .join('');
   return `<table>${headHtml}<tbody>${bodyHtml}</tbody></table>`;
+}
+
+/**
+ * Renders the lines of a single block (text already split on blank lines) into
+ * Teams HTML. Walks the lines and groups consecutive runs by type, so block
+ * elements (lists, blockquotes, tables, headings) can interrupt a paragraph
+ * without a separating blank line, matching standard markdown behaviour. Plain
+ * lines accumulate into a paragraph and are joined with <br>.
+ */
+function renderTextBlock(lines: string[]): string {
+  const out: string[] = [];
+  let para: string[] = [];
+  const flushParagraph = (): void => {
+    if (para.length) {
+      out.push(`<p>${para.join('<br>')}</p>`);
+      para = [];
+    }
+  };
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Heading: its own single-line block
+    const heading = line.match(/^\s*(#{1,6})\s+(.*)$/);
+    if (heading) {
+      flushParagraph();
+      out.push(`<h${heading[1].length}>${convertInlineFormatting(heading[2])}</h${heading[1].length}>`);
+      i++;
+      continue;
+    }
+
+    // Table: a row containing a pipe immediately followed by a separator row
+    if (i + 1 < lines.length && /\|/.test(line) && isTableSeparator(lines[i + 1])) {
+      flushParagraph();
+      const tableLines = [line, lines[i + 1]];
+      i += 2;
+      while (i < lines.length && /\|/.test(lines[i]) && !isTableSeparator(lines[i])) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      out.push(buildTableHtml(tableLines));
+      continue;
+    }
+
+    // Unordered list run
+    if (/^\s*[-*]\s+/.test(line)) {
+      flushParagraph();
+      const items: string[] = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        items.push(`<li>${convertInlineFormatting(lines[i].replace(/^\s*[-*]\s+/, ''))}</li>`);
+        i++;
+      }
+      out.push(`<ul>${items.join('')}</ul>`);
+      continue;
+    }
+
+    // Ordered list run
+    if (/^\s*\d+[.)]\s+/.test(line)) {
+      flushParagraph();
+      const items: string[] = [];
+      while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) {
+        items.push(`<li>${convertInlineFormatting(lines[i].replace(/^\s*\d+[.)]\s+/, ''))}</li>`);
+        i++;
+      }
+      out.push(`<ol>${items.join('')}</ol>`);
+      continue;
+    }
+
+    // Blockquote run
+    if (/^\s*>\s?/.test(line)) {
+      flushParagraph();
+      const inner: string[] = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) {
+        inner.push(convertInlineFormatting(lines[i].replace(/^\s*>\s?/, '')));
+        i++;
+      }
+      out.push(`<blockquote>${inner.join('<br>')}</blockquote>`);
+      continue;
+    }
+
+    // Plain text line: accumulate into the current paragraph
+    para.push(convertInlineFormatting(line));
+    i++;
+  }
+
+  flushParagraph();
+  return out.join('');
 }
 
 /**
@@ -106,68 +201,14 @@ export function markdownToTeamsHtml(text: string): string {
       continue;
     }
     
-    // Process text segments: split into paragraphs on double newlines
+    // Process text segments: split into paragraphs on double newlines, then
+    // render each block, letting block elements interrupt a paragraph.
     const paragraphs = segment.content.split(/\n{2,}/);
     
     for (const para of paragraphs) {
       const trimmed = para.trim();
       if (!trimmed) continue;
-      
-      const lines = trimmed.split('\n');
-      
-      // Table block: a header row plus a separator row of dashes/pipes
-      if (
-        lines.length >= 2 &&
-        /\|/.test(lines[0]) &&
-        /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(lines[1])
-      ) {
-        htmlParts.push(buildTableHtml(lines));
-        continue;
-      }
-      
-      // Check if this paragraph is a list or a blockquote
-      const isUnorderedList = lines.every(l => /^\s*[-*]\s+/.test(l));
-      const isOrderedList = lines.every(l => /^\s*\d+[.)]\s+/.test(l));
-      const isBlockquote = lines.every(l => /^\s*>\s?/.test(l));
-      
-      if (isUnorderedList) {
-        const items = lines.map(l => {
-          const content = l.replace(/^\s*[-*]\s+/, '');
-          return `<li>${convertInlineFormatting(content)}</li>`;
-        });
-        htmlParts.push(`<ul>${items.join('')}</ul>`);
-      } else if (isOrderedList) {
-        const items = lines.map(l => {
-          const content = l.replace(/^\s*\d+[.)]\s+/, '');
-          return `<li>${convertInlineFormatting(content)}</li>`;
-        });
-        htmlParts.push(`<ol>${items.join('')}</ol>`);
-      } else if (isBlockquote) {
-        const inner = lines.map(l => convertInlineFormatting(l.replace(/^\s*>\s?/, ''))).join('<br>');
-        htmlParts.push(`<blockquote>${inner}</blockquote>`);
-      } else {
-        // Regular paragraph - convert heading lines to <h*>, join the rest with <br>
-        const out: string[] = [];
-        let buf: string[] = [];
-        const flushBuf = (): void => {
-          if (buf.length) {
-            out.push(`<p>${buf.join('<br>')}</p>`);
-            buf = [];
-          }
-        };
-        for (const l of lines) {
-          const h = l.match(/^\s*(#{1,6})\s+(.*)$/);
-          if (h) {
-            flushBuf();
-            const level = h[1].length;
-            out.push(`<h${level}>${convertInlineFormatting(h[2])}</h${level}>`);
-          } else {
-            buf.push(convertInlineFormatting(l));
-          }
-        }
-        flushBuf();
-        htmlParts.push(out.join(''));
-      }
+      htmlParts.push(renderTextBlock(trimmed.split('\n')));
     }
   }
   
