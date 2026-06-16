@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-06-16
+
+### Added
+- `teams_get_recording`: get a meeting's recording(s) from the meeting `threadId` (from `teams_get_meetings`). Returns metadata (title, file name, start/end time, duration) plus a `playbackUrl` (opens in the SharePoint/Stream web player) and a `downloadUrl` (direct `.mp4`) for each recording, rather than the video bytes. Uses the same Substrate `WorkingSetFiles` lookup as `teams_get_transcript`, so no extra authentication is needed.
+
 ## [0.26.1] - 2026-06-15
 
 ### Fixed
@@ -39,7 +44,9 @@ All notable changes to this project are documented here. The format is based on
 
 See the [GitHub releases](https://github.com/shayanline/msteams-mcp/releases) for the history before independent maintenance began.
 
-[Unreleased]: https://github.com/shayanline/msteams-mcp/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/shayanline/msteams-mcp/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/shayanline/msteams-mcp/compare/v0.26.1...v0.27.0
+[0.26.1]: https://github.com/shayanline/msteams-mcp/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/shayanline/msteams-mcp/compare/v0.25.1...v0.26.0
 [0.25.1]: https://github.com/shayanline/msteams-mcp/compare/v0.25.0...v0.25.1
 [0.25.0]: https://github.com/shayanline/msteams-mcp/compare/v0.24.1...v0.25.0
