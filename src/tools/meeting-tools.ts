@@ -17,6 +17,7 @@ import {
   findMeetingTimes,
 } from '../api/calendar-api.js';
 import { getTranscriptContent } from '../api/transcript-api.js';
+import { getMeetingRecordings } from '../api/recording-api.js';
 import {
   DEFAULT_MEETING_LIMIT,
   MAX_MEETING_LIMIT,
@@ -33,6 +34,11 @@ export const GetMeetingsInputSchema = z.object({
 });
 
 export const GetTranscriptInputSchema = z.object({
+  threadId: z.string().min(1),
+  meetingDate: z.string().optional(),
+});
+
+export const GetRecordingInputSchema = z.object({
   threadId: z.string().min(1),
   meetingDate: z.string().optional(),
 });
@@ -502,6 +508,38 @@ async function handleGetTranscript(
   }));
 }
 
+const getRecordingToolDefinition: Tool = {
+  name: 'teams_get_recording',
+  description: 'Get the recording(s) of a Teams meeting. Requires the meeting\'s threadId (from teams_get_meetings). Returns metadata plus a playbackUrl (opens in the SharePoint/Stream web player) and a downloadUrl (direct .mp4) for each recording — not the video bytes themselves. The meeting must have been recorded. Optionally pass meetingDate (ISO string, e.g. the startTime from teams_get_meetings) to narrow the search. Use teams_get_transcript if you only need the spoken content.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      threadId: {
+        type: 'string',
+        description: 'The meeting thread ID (from the threadId field of teams_get_meetings results, e.g., "19:meeting_xxx@thread.v2").',
+      },
+      meetingDate: {
+        type: 'string',
+        description: 'Optional ISO date/time of the meeting (e.g., the startTime from teams_get_meetings). Helps narrow the search for recurring meetings.',
+      },
+    },
+    required: ['threadId'],
+  },
+};
+
+async function handleGetRecording(
+  input: z.infer<typeof GetRecordingInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  const result = await getMeetingRecordings(input.threadId, input.meetingDate);
+
+  return handleApiResult(result, (value) => ({
+    meetingTitle: value.meetingTitle,
+    count: value.count,
+    recordings: value.recordings,
+  }));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Exports
 // ─────────────────────────────────────────────────────────────────────────────
@@ -560,6 +598,12 @@ export const getTranscriptTool: RegisteredTool<typeof GetTranscriptInputSchema> 
   handler: handleGetTranscript,
 };
 
+export const getRecordingTool: RegisteredTool<typeof GetRecordingInputSchema> = {
+  definition: getRecordingToolDefinition,
+  schema: GetRecordingInputSchema,
+  handler: handleGetRecording,
+};
+
 /** All meeting-related tools. */
 export const meetingTools = [
   getMeetingsTool,
@@ -571,4 +615,5 @@ export const meetingTools = [
   getScheduleTool,
   findMeetingTimesTool,
   getTranscriptTool,
+  getRecordingTool,
 ];
