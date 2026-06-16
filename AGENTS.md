@@ -50,6 +50,7 @@ src/
 │   ├── csa-api.ts        # Favorites API (CSA)
 │   ├── calendar-api.ts   # Calendar/meetings API
 │   ├── transcript-api.ts # Meeting transcripts (Substrate WorkingSetFiles)
+│   ├── recording-api.ts  # Meeting recordings (Substrate WorkingSetFiles → SharePoint mp4)
 │   └── files-api.ts      # Shared files (Substrate AllFiles)
 ├── browser/              # Playwright browser automation (login only)
 │   ├── context.ts        # Persistent browser profile management
@@ -156,6 +157,7 @@ Different Teams APIs use different authentication mechanisms:
 | **Threads** (chatsvc) | `skypetoken_asm` cookie | `auth/token-extractor` | `extractMessageAuth()` |
 | **Calendar** (mt/part/calendarView) | Skype Spaces token (`api.spaces.skype.com` scope) + `skypetoken_asm` | `auth/token-extractor` | `extractSkypeSpacesToken()` |
 | **Transcripts** (Substrate WorkingSetFiles) | Same JWT as Search (Substrate scope) + `Prefer` header | `auth/token-extractor` | `getValidSubstrateToken()` |
+| **Recordings** (Substrate WorkingSetFiles) | Same JWT as Search (Substrate scope) + `Prefer` header; returns SharePoint mp4 URLs | `auth/token-extractor` | `getValidSubstrateToken()` |
 | **Files** (Substrate AllFiles) | Same JWT as Search (Substrate scope) + message auth for user MRI | `auth/token-extractor` | `getValidSubstrateToken()` + `extractMessageAuth()` |
 
 **Important**: The CSA API (for favorites) requires a GET request to retrieve data, POST only for modifications. The Substrate suggestions API requires `cvid` and `logicalId` correlation IDs in the request body.
@@ -214,6 +216,7 @@ Session state and token cache files are protected by:
 | `teams_remove_reaction` | Remove an emoji reaction from a message |
 | `teams_get_meetings` | Get meetings from calendar (upcoming/past by date range) |
 | `teams_get_transcript` | Get meeting transcript (requires threadId from teams_get_meetings) |
+| `teams_get_recording` | Get meeting recording playback/download URLs + metadata (requires threadId from teams_get_meetings) |
 | `teams_get_shared_files` | Get files and links shared in a conversation |
 | `teams_send_file` | Send a local file as a native attachment (real chiclet); channels upload to the channel SharePoint library, chats to OneDrive |
 

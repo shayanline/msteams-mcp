@@ -160,8 +160,9 @@ The server uses your system's Chrome (macOS/Linux) or Edge (Windows) for authent
 | `teams_get_schedule` | Check free/busy availability for one or more people over a time window |
 | `teams_find_meeting_times` | Suggest meeting slots that work across attendees (ranked by confidence) |
 | `teams_get_transcript` | Get meeting transcript (requires `threadId` from `teams_get_meetings`) |
+| `teams_get_recording` | Get meeting recording playback/download URLs + metadata (requires `threadId` from `teams_get_meetings`) |
 
-`teams_get_meetings` returns: subject, times, organiser, join URL, `threadId` for meeting chat. Use `threadId` with `teams_get_thread` to read meeting chat, or with `teams_get_transcript` to get the full transcript with speakers and timestamps.
+`teams_get_meetings` returns: subject, times, organiser, join URL, `threadId` for meeting chat. Use `threadId` with `teams_get_thread` to read meeting chat, with `teams_get_transcript` to get the full transcript with speakers and timestamps, or with `teams_get_recording` to get the recording's playback and download URLs.
 
 ### Files
 
