@@ -300,23 +300,23 @@ function buildFileProperty(info: ShareFileInfo, shareUrl: string): Record<string
   };
 }
 
+/** One uploaded file ready to be attached to a message. */
+interface PreparedFile {
+  fileProperty: Record<string, unknown>;
+  fileName: string;
+  webUrl: string;
+}
+
 /**
- * Sends a file into a Teams conversation as a native attachment: it posts a
- * message carrying the file in its `files` property so Teams shows a real file
- * chiclet (and lists it in the Files tab), with an optional caption as the text.
- *
- * The file is uploaded to the correct place for the conversation type, matching
- * what the Teams client itself does:
- * - **Channels**: the channel's own SharePoint files folder (so it appears in the
- *   channel Files tab); channel members already have access.
- * - **Chats** (1:1, group, meeting, self): the sender's OneDrive "Microsoft Teams
- *   Chat Files", shared with the conversation via an org link.
+ * Uploads a single local file to the right place for the conversation and
+ * returns the chatsvc file property plus display info, without posting anything.
+ * Channel files go into the channel's SharePoint library; chat files go into the
+ * sender's OneDrive and are shared via an org link.
  */
-export async function sendFileToChat(
+async function prepareFileForChat(
   conversationId: string,
-  localPath: string,
-  caption?: string
-): Promise<Result<{ conversationId: string; fileName: string; webUrl: string; messageId: string }>> {
+  localPath: string
+): Promise<Result<PreparedFile>> {
   const isChannel = getConversationType(conversationId) === 'channel';
 
   let info: Result<ShareFileInfo>;
@@ -349,9 +349,69 @@ export async function sendFileToChat(
 
   if (!info.ok) return info;
 
-  const fileProperty = buildFileProperty(info.value, shareUrl);
-  const sent = await sendMessage(conversationId, caption ?? '', { files: [fileProperty] });
+  return ok({
+    fileProperty: buildFileProperty(info.value, shareUrl),
+    fileName: info.value.fileName,
+    webUrl,
+  });
+}
+
+/**
+ * Sends a file into a Teams conversation as a native attachment: it posts a
+ * message carrying the file in its `files` property so Teams shows a real file
+ * chiclet (and lists it in the Files tab), with an optional caption as the text.
+ *
+ * The file is uploaded to the correct place for the conversation type, matching
+ * what the Teams client itself does:
+ * - **Channels**: the channel's own SharePoint files folder (so it appears in the
+ *   channel Files tab); channel members already have access.
+ * - **Chats** (1:1, group, meeting, self): the sender's OneDrive "Microsoft Teams
+ *   Chat Files", shared with the conversation via an org link.
+ */
+export async function sendFileToChat(
+  conversationId: string,
+  localPath: string,
+  caption?: string
+): Promise<Result<{ conversationId: string; fileName: string; webUrl: string; messageId: string }>> {
+  const prepared = await prepareFileForChat(conversationId, localPath);
+  if (!prepared.ok) return prepared;
+
+  const sent = await sendMessage(conversationId, caption ?? '', { files: [prepared.value.fileProperty] });
   if (!sent.ok) return sent;
 
-  return ok({ conversationId, fileName: info.value.fileName, webUrl, messageId: sent.value.messageId });
+  return ok({ conversationId, fileName: prepared.value.fileName, webUrl: prepared.value.webUrl, messageId: sent.value.messageId });
+}
+
+/**
+ * Sends several local files into a Teams conversation as native attachments on a
+ * single message (one message, multiple file chiclets), with an optional caption
+ * as the text. Each file is uploaded to the right place for the conversation type
+ * (see `sendFileToChat`), then all are attached to one `sendMessage` call.
+ */
+export async function sendFilesToChat(
+  conversationId: string,
+  localPaths: string[],
+  caption?: string
+): Promise<Result<{ conversationId: string; files: Array<{ fileName: string; webUrl: string }>; messageId: string }>> {
+  if (localPaths.length === 0) {
+    return err(createError(ErrorCode.INVALID_INPUT, 'Provide at least one file to send.'));
+  }
+
+  const prepared: PreparedFile[] = [];
+  for (const localPath of localPaths) {
+    const file = await prepareFileForChat(conversationId, localPath);
+    if (!file.ok) return file;
+    prepared.push(file.value);
+  }
+
+  const sent = await sendMessage(conversationId, caption ?? '', {
+    files: prepared.map((p) => p.fileProperty),
+  });
+  if (!sent.ok) return sent;
+
+  return ok({
+    conversationId,
+    files: prepared.map((p) => ({ fileName: p.fileName, webUrl: p.webUrl })),
+    messageId: sent.value.messageId,
+  });
 }

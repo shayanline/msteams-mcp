@@ -7,7 +7,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { RegisteredTool, ToolContext, ToolResult } from './index.js';
 import { handleApiResult } from './index.js';
 import { getSharedFiles } from '../api/files-api.js';
-import { listDriveFiles, uploadFile, downloadFile, sendFileToChat } from '../api/files-graph-api.js';
+import { listDriveFiles, uploadFile, downloadFile, sendFileToChat, sendFilesToChat } from '../api/files-graph-api.js';
 import {
   DEFAULT_FILES_PAGE_SIZE,
   MAX_FILES_PAGE_SIZE,
@@ -40,6 +40,12 @@ export const DownloadFileInputSchema = z.object({
 export const SendFileInputSchema = z.object({
   conversationId: z.string().min(1),
   localPath: z.string().min(1),
+  caption: z.string().optional(),
+});
+
+export const SendFilesInputSchema = z.object({
+  conversationId: z.string().min(1),
+  localPaths: z.array(z.string().min(1)).min(1),
   caption: z.string().optional(),
 });
 
@@ -121,6 +127,20 @@ const sendFileToolDefinition: Tool = {
   },
 };
 
+const sendFilesToolDefinition: Tool = {
+  name: 'teams_send_files',
+  description: 'Send several local files into a Teams conversation as native attachments on a SINGLE message (one message, multiple file chiclets), with an optional caption as the message text. Use this instead of calling teams_send_file repeatedly when you want all files grouped under one message rather than one message per file. Each file becomes a real file chiclet that also appears in the conversation\'s Files tab. Files are uploaded to the right place automatically (a channel\'s SharePoint files folder for channels, or your OneDrive "Microsoft Teams Chat Files" for chats). Confirm the content with the user before sending.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      conversationId: { type: 'string', description: 'The conversation to send the files to (1:1, group, meeting, self chat, or channel).' },
+      localPaths: { type: 'array', items: { type: 'string' }, description: 'Absolute paths to the local files to attach to the one message (at least one).' },
+      caption: { type: 'string', description: 'Optional message text to send with the files.' },
+    },
+    required: ['conversationId', 'localPaths'],
+  },
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Handlers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -151,6 +171,13 @@ async function handleSendFile(
   _ctx: ToolContext
 ): Promise<ToolResult> {
   return handleApiResult(await sendFileToChat(input.conversationId, input.localPath, input.caption), (v) => ({ ...v, message: 'File sent to conversation.' }));
+}
+
+async function handleSendFiles(
+  input: z.infer<typeof SendFilesInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  return handleApiResult(await sendFilesToChat(input.conversationId, input.localPaths, input.caption), (v) => ({ ...v, message: `${v.files.length} file(s) sent on one message.` }));
 }
 
 async function handleGetSharedFiles(
@@ -192,6 +219,9 @@ export const downloadFileTool: RegisteredTool<typeof DownloadFileInputSchema> = 
 export const sendFileTool: RegisteredTool<typeof SendFileInputSchema> = {
   definition: sendFileToolDefinition, schema: SendFileInputSchema, handler: handleSendFile,
 };
+export const sendFilesTool: RegisteredTool<typeof SendFilesInputSchema> = {
+  definition: sendFilesToolDefinition, schema: SendFilesInputSchema, handler: handleSendFiles,
+};
 
 /** All file-related tools. */
-export const fileTools = [getSharedFilesTool, listFilesTool, uploadFileTool, downloadFileTool, sendFileTool];
+export const fileTools = [getSharedFilesTool, listFilesTool, uploadFileTool, downloadFileTool, sendFileTool, sendFilesTool];
