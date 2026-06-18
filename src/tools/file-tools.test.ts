@@ -14,16 +14,18 @@ vi.mock('../api/files-graph-api.js', () => ({
   uploadFile: vi.fn(),
   downloadFile: vi.fn(),
   sendFileToChat: vi.fn(),
+  sendFilesToChat: vi.fn(),
 }));
 
 import { getSharedFiles } from '../api/files-api.js';
-import { listDriveFiles, uploadFile, downloadFile, sendFileToChat } from '../api/files-graph-api.js';
+import { listDriveFiles, uploadFile, downloadFile, sendFileToChat, sendFilesToChat } from '../api/files-graph-api.js';
 import {
   getSharedFilesTool,
   listFilesTool,
   uploadFileTool,
   downloadFileTool,
   sendFileTool,
+  sendFilesTool,
 } from './file-tools.js';
 
 const ctx = { server: {} } as never;
@@ -80,6 +82,19 @@ describe('sendFileTool', () => {
   it('propagates errors', async () => {
     vi.mocked(sendFileToChat).mockResolvedValue(anErr as never);
     expect((await sendFileTool.handler({ conversationId: 'c1', localPath: '/tmp/a' }, ctx)).success).toBe(false);
+  });
+});
+
+describe('sendFilesTool', () => {
+  it('sends multiple files on one message on success', async () => {
+    vi.mocked(sendFilesToChat).mockResolvedValue(ok({ messageId: 'm1', files: [{}, {}] }) as never);
+    const res = await sendFilesTool.handler({ conversationId: 'c1', localPaths: ['/tmp/a', '/tmp/b'] }, ctx);
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data.message).toBe('2 file(s) sent on one message.');
+  });
+  it('propagates errors', async () => {
+    vi.mocked(sendFilesToChat).mockResolvedValue(anErr as never);
+    expect((await sendFilesTool.handler({ conversationId: 'c1', localPaths: ['/tmp/a'] }, ctx)).success).toBe(false);
   });
 });
 

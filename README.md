@@ -173,10 +173,13 @@ The server uses your system's Chrome (macOS/Linux) or Edge (Windows) for authent
 | `teams_upload_file` | Upload a local file to your OneDrive (up to 250 MB) |
 | `teams_download_file` | Download a OneDrive file by item id to a local path |
 | `teams_send_file` | Send a local file into a conversation as a native attachment (real file chiclet, also appears in the Files tab) |
+| `teams_send_files` | Send several local files into a conversation as native attachments on a single message (one message, multiple file chiclets) |
 
 `teams_get_shared_files` returns both files (name, extension, URL, size) and links (URL, title), along with who shared each item. Works for channels, group chats, 1:1 chats, and meeting chats.
 
 `teams_send_file` posts a **native file attachment** (a real file chiclet, not just a link), and uploads the file to the right place for the conversation type, matching the Teams client: for a **channel** it goes into the channel's own SharePoint files folder (so it shows in the channel Files tab); for **chats** (1:1, group, meeting, self) it goes into your OneDrive "Microsoft Teams Chat Files" and is shared with the conversation via an organisation link.
+
+`teams_send_files` does the same but attaches **multiple files to one message**, so you get a single post carrying several file chiclets rather than one message per file. Pass `localPaths` (an array) and an optional `caption`.
 
 ### Tasks (Microsoft To Do)
 
