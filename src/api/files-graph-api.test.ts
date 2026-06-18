@@ -10,7 +10,7 @@ import { httpRequest } from '../utils/http.js';
 import { requireGraphAuth } from '../utils/auth-guards.js';
 import { sendMessage, getChannelFilesInfo } from './chatsvc-messaging.js';
 import { readFile, writeFile } from 'node:fs/promises';
-import { listDriveFiles, uploadFile, downloadFile, createShareLink, sendFileToChat } from './files-graph-api.js';
+import { listDriveFiles, uploadFile, downloadFile, createShareLink, sendFileToChat, sendFilesToChat } from './files-graph-api.js';
 
 const mockHttp = vi.mocked(httpRequest);
 const mockAuth = vi.mocked(requireGraphAuth);
@@ -209,6 +209,47 @@ describe('sendFileToChat (channel conversations)', () => {
   it('returns the channel-info error when the team cannot be resolved', async () => {
     mockChannelInfo.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
     const res = await sendFileToChat('19:abc@thread.tacv2', '/tmp/report.pdf');
+    expect(res.ok).toBe(false);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+});
+
+describe('sendFilesToChat (multiple files, one message)', () => {
+  it('uploads every file and posts them as attachments on a single message', async () => {
+    mockRead.mockResolvedValue(Buffer.from('hi'));
+    // Two files: each needs upload (PUT) + createShareLink + getShareFileInfo.
+    mockHttp
+      .mockResolvedValueOnce(httpOk({ id: '01A', name: 'a.pdf' }))
+      .mockResolvedValueOnce(httpOk({ link: { webUrl: 'https://share/a' } }))
+      .mockResolvedValueOnce(shareInfoResponse('https://t-my.sharepoint.com/personal/u/Documents/Microsoft%20Teams%20Chat%20Files/a.pdf'))
+      .mockResolvedValueOnce(httpOk({ id: '01B', name: 'b.xlsx' }))
+      .mockResolvedValueOnce(httpOk({ link: { webUrl: 'https://share/b' } }))
+      .mockResolvedValueOnce(shareInfoResponse('https://t-my.sharepoint.com/personal/u/Documents/Microsoft%20Teams%20Chat%20Files/b.xlsx'));
+    mockSend.mockResolvedValueOnce(ok({ messageId: 'm', timestamp: 1 }) as never);
+
+    const res = await sendFilesToChat('48:notes', ['/tmp/a.pdf', '/tmp/b.xlsx'], 'two files');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.files).toHaveLength(2);
+    expect(res.value.messageId).toBe('m');
+
+    // One single message carrying both file properties.
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    const [conv, content, options] = mockSend.mock.calls[0] as [string, string, { files?: Record<string, unknown>[] }];
+    expect(conv).toBe('48:notes');
+    expect(content).toBe('two files');
+    expect(options.files).toHaveLength(2);
+  });
+
+  it('rejects an empty file list and never posts', async () => {
+    const res = await sendFilesToChat('48:notes', []);
+    expect(res.ok).toBe(false);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it('returns the first upload error and never posts', async () => {
+    mockRead.mockRejectedValueOnce(new Error('ENOENT'));
+    const res = await sendFilesToChat('48:notes', ['/tmp/missing.pdf', '/tmp/b.xlsx']);
     expect(res.ok).toBe(false);
     expect(mockSend).not.toHaveBeenCalled();
   });
