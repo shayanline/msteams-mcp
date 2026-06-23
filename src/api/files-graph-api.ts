@@ -101,6 +101,33 @@ export async function downloadFile(itemId: string, outputPath: string): Promise<
   return ok({ outputPath, bytes: buf.length });
 }
 
+/**
+ * Downloads a file shared in a Teams conversation by its SharePoint/OneDrive URL.
+ *
+ * Works for files from other users' drives that you have access to (e.g. shared
+ * in a chat). Uses the Microsoft Graph Shares API which can resolve any sharing
+ * URL the authenticated user has been granted access to.
+ */
+export async function downloadSharedFile(shareUrl: string, outputPath: string): Promise<Result<{ outputPath: string; bytes: number }>> {
+  const auth = requireGraphAuth();
+  if (!auth.ok) return auth;
+
+  // Graph Shares API requires the URL encoded as base64url with a 'u!' prefix.
+  const encodedUrl = 'u!' + Buffer.from(shareUrl).toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+
+  const res = await fetch(`${GRAPH_BASE_URL}/shares/${encodeURIComponent(encodedUrl)}/driveItem/content`, {
+    method: 'GET',
+    headers: bearer(auth.value),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    return err(createError(ErrorCode.UNKNOWN, `Download failed: HTTP ${res.status} ${text.slice(0, 150)}`));
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  await writeFile(outputPath, buf);
+  return ok({ outputPath, bytes: buf.length });
+}
+
 /** Creates an organisation-scoped sharing link for a drive item. */
 export async function createShareLink(
   itemId: string,
