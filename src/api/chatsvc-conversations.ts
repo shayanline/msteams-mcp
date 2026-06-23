@@ -5,6 +5,10 @@
  * group chats and threads.
  */
 
+import { tmpdir } from 'node:os';
+import { unlink } from 'node:fs/promises';
+import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { httpRequest } from '../utils/http.js';
 import { CHATSVC_API, getMessagingHeaders, getSkypeAuthHeaders } from '../utils/api-config.js';
 import { type Result, ok, err } from '../types/result.js';
@@ -13,6 +17,7 @@ import { requireMessageAuthWithConfig } from '../utils/auth-guards.js';
 import { extractObjectId, escapeHtmlChars } from '../utils/parsers.js';
 import { MRI_ORGID_PREFIX } from '../constants.js';
 import { getMessage, sendMessage, buildReplyQuoteHtml } from './chatsvc-messaging.js';
+import { downloadSharedFile, prepareFileForChat } from './files-graph-api.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -163,7 +168,9 @@ export async function renameChat(
 /**
  * Forwards a message to another conversation. Teams has no native forward, so
  * the original is fetched and re-sent as a quoted block (with an optional note)
- * into the target conversation.
+ * into the target conversation. If the original message has file attachments,
+ * each file is downloaded from SharePoint and re-uploaded as a native chiclet
+ * into the target conversation on the same message.
  */
 export async function forwardMessage(
   sourceConversationId: string,
@@ -178,7 +185,34 @@ export async function forwardMessage(
   const note = comment ? `${escapeHtmlChars(comment)}<br><br>` : '';
   const html = `${note}<i>Forwarded message:</i><br>${quote}`;
 
-  const sent = await sendMessage(targetConversationId, '', { rawContentHtml: html });
+  // If the original message has file attachments, download and re-upload each one.
+  const fileUrls = original.value.fileUrls ?? [];
+  const fileProperties: Record<string, unknown>[] = [];
+  const tempPaths: string[] = [];
+
+  for (const url of fileUrls) {
+    // Use a random temp path with the original file extension where possible.
+    const ext = url.split('.').pop()?.split('?')[0] ?? 'bin';
+    const tempPath = join(tmpdir(), `mcp-fwd-${randomBytes(8).toString('hex')}.${ext}`);
+    tempPaths.push(tempPath);
+
+    const downloaded = await downloadSharedFile(url, tempPath);
+    if (!downloaded.ok) continue; // Skip files we cannot access; still forward the text.
+
+    const prepared = await prepareFileForChat(targetConversationId, tempPath);
+    if (prepared.ok) {
+      fileProperties.push(prepared.value.fileProperty);
+    }
+  }
+
+  const sent = await sendMessage(targetConversationId, '', {
+    rawContentHtml: html,
+    ...(fileProperties.length > 0 ? { files: fileProperties } : {}),
+  });
+
+  // Clean up temp files regardless of send outcome.
+  await Promise.allSettled(tempPaths.map((p) => unlink(p)));
+
   if (!sent.ok) return sent;
   return ok({ targetConversationId });
 }

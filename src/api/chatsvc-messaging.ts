@@ -47,6 +47,12 @@ export interface ThreadMessage {
   threadRootId?: string;
   /** True if this message is a reply within a channel thread (not a top-level post) */
   isThreadReply?: boolean;
+  /**
+   * SharePoint/OneDrive URLs of files attached to this message (from properties.files).
+   * Present when the message has native file chiclet attachments.
+   * Use with downloadSharedFile to retrieve the file bytes.
+   */
+  fileUrls?: string[];
 }
 
 /** Result of getting thread messages. */
@@ -350,6 +356,25 @@ export async function getMessage(
   const links = extractLinks(content);
   const when = formatHumanReadableDate(timestamp);
 
+  // Extract file URLs from properties.files (a JSON string of http://schema.skype.com/File objects).
+  let fileUrls: string[] | undefined;
+  const rawFilesJson = msg.properties?.files;
+  if (typeof rawFilesJson === 'string' && rawFilesJson.length > 0) {
+    try {
+      const rawFiles = JSON.parse(rawFilesJson) as Array<Record<string, unknown>>;
+      const urls = rawFiles
+        .map((f) => {
+          const objectUrl = f.objectUrl as string | undefined;
+          const fileInfo = f.fileInfo as Record<string, unknown> | undefined;
+          return objectUrl || (fileInfo?.fileUrl as string | undefined);
+        })
+        .filter((u): u is string => typeof u === 'string' && u.length > 0);
+      if (urls.length > 0) fileUrls = urls;
+    } catch {
+      // Ignore malformed files JSON.
+    }
+  }
+
   return ok({
     id,
     content: stripHtml(content),
@@ -367,6 +392,7 @@ export async function getMessage(
     links: links.length > 0 ? links : undefined,
     threadRootId: isThreadReply ? rootMessageId : undefined,
     isThreadReply: isThreadReply || undefined,
+    fileUrls,
   });
 }
 
