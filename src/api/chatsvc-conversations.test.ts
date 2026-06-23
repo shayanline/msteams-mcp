@@ -144,8 +144,9 @@ describe('forwardMessage', () => {
     const [target, content, opts] = mockSend.mock.calls[0] as [string, string, { rawContentHtml: string }];
     expect(target).toBe('48:notes');
     expect(content).toBe('');
-    expect(opts.rawContentHtml).toContain('Forwarded message');
+    // comment is prepended; no hardcoded "Forwarded message:" label
     expect(opts.rawContentHtml).toContain('FYI');
+    expect(opts.rawContentHtml).not.toContain('Forwarded message');
     expect(opts.rawContentHtml).toContain('<quote/>');
   });
 

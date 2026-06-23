@@ -649,7 +649,7 @@ const renameChatToolDefinition: Tool = {
 
 const forwardMessageToolDefinition: Tool = {
   name: 'teams_forward_message',
-  description: 'Forward a message to another conversation. The original is re-posted as a quoted "Forwarded message" block in the target, with an optional note above it. Get the source IDs from teams_search or teams_get_thread.',
+  description: 'Forward a message to another conversation. Re-posts the original as a quoted block (sender name + content) and carries file attachments as native chiclets with no re-upload. No label is injected by default — pass an optional comment to prepend a note above the quote. Get the source IDs from teams_search or teams_get_thread.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -1213,6 +1213,8 @@ async function handleGetMessage(
       links: msg.links,
       threadRootId: msg.threadRootId,
       isThreadReply: msg.isThreadReply,
+      rawHtml: msg.rawHtml,
+      rawFileObjects: msg.rawFileObjects,
     },
   };
 }
