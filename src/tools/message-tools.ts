@@ -1213,6 +1213,8 @@ async function handleGetMessage(
       links: msg.links,
       threadRootId: msg.threadRootId,
       isThreadReply: msg.isThreadReply,
+      rawHtml: msg.rawHtml,
+      rawFileObjects: msg.rawFileObjects,
     },
   };
 }

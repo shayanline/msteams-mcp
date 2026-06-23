@@ -53,6 +53,16 @@ export interface ThreadMessage {
    * Use with downloadSharedFile to retrieve the file bytes.
    */
   fileUrls?: string[];
+  /**
+   * Original HTML content before stripping (the raw RichText/Html from the API).
+   * Used when re-posting a message verbatim (e.g. forwarding).
+   */
+  rawHtml?: string;
+  /**
+   * Full parsed file chiclet objects from properties.files.
+   * Pass directly to sendMessage({ files }) to re-attach without re-uploading.
+   */
+  rawFileObjects?: Record<string, unknown>[];
 }
 
 /** Result of getting thread messages. */
@@ -356,12 +366,14 @@ export async function getMessage(
   const links = extractLinks(content);
   const when = formatHumanReadableDate(timestamp);
 
-  // Extract file URLs from properties.files (a JSON string of http://schema.skype.com/File objects).
+  // Extract file data from properties.files (a JSON string of http://schema.skype.com/File objects).
   let fileUrls: string[] | undefined;
+  let rawFileObjects: Record<string, unknown>[] | undefined;
   const rawFilesJson = msg.properties?.files;
   if (typeof rawFilesJson === 'string' && rawFilesJson.length > 0) {
     try {
       const rawFiles = JSON.parse(rawFilesJson) as Array<Record<string, unknown>>;
+      rawFileObjects = rawFiles.length > 0 ? rawFiles : undefined;
       const urls = rawFiles
         .map((f) => {
           const objectUrl = f.objectUrl as string | undefined;
@@ -378,6 +390,7 @@ export async function getMessage(
   return ok({
     id,
     content: stripHtml(content),
+    rawHtml: content || undefined,
     contentType,
     sender: {
       mri: fromMri,
@@ -393,6 +406,7 @@ export async function getMessage(
     threadRootId: isThreadReply ? rootMessageId : undefined,
     isThreadReply: isThreadReply || undefined,
     fileUrls,
+    rawFileObjects,
   });
 }
 
