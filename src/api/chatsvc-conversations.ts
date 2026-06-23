@@ -161,9 +161,11 @@ export async function renameChat(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Forwards a message to another conversation. Teams has no native forward, so
- * the original is fetched and re-sent as a quoted block (with an optional note)
- * into the target conversation.
+ * Forwards a message to another conversation by re-posting the original content
+ * verbatim — matching native Teams forward behaviour. The original HTML and file
+ * chiclet objects are taken directly from the source message and posted as-is,
+ * with no re-upload and no "Forwarded message" wrapper. An optional comment is
+ * prepended above the content.
  */
 export async function forwardMessage(
   sourceConversationId: string,
@@ -176,9 +178,15 @@ export async function forwardMessage(
 
   const quote = buildReplyQuoteHtml(original.value);
   const note = comment ? `${escapeHtmlChars(comment)}<br><br>` : '';
-  const html = `${note}<i>Forwarded message:</i><br>${quote}`;
+  const html = `${note}${quote}`;
 
-  const sent = await sendMessage(targetConversationId, '', { rawContentHtml: html });
+  const sent = await sendMessage(targetConversationId, '', {
+    rawContentHtml: html,
+    ...(original.value.rawFileObjects && original.value.rawFileObjects.length > 0
+      ? { files: original.value.rawFileObjects }
+      : {}),
+  });
+
   if (!sent.ok) return sent;
   return ok({ targetConversationId });
 }

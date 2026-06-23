@@ -340,7 +340,7 @@ interface PreparedFile {
  * Channel files go into the channel's SharePoint library; chat files go into the
  * sender's OneDrive and are shared via an org link.
  */
-async function prepareFileForChat(
+export async function prepareFileForChat(
   conversationId: string,
   localPath: string
 ): Promise<Result<PreparedFile>> {
