@@ -7,7 +7,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { RegisteredTool, ToolContext, ToolResult } from './index.js';
 import { handleApiResult } from './index.js';
 import { getSharedFiles } from '../api/files-api.js';
-import { listDriveFiles, uploadFile, downloadFile, sendFileToChat, sendFilesToChat } from '../api/files-graph-api.js';
+import { listDriveFiles, uploadFile, downloadFile, downloadSharedFile, sendFileToChat, sendFilesToChat } from '../api/files-graph-api.js';
 import {
   DEFAULT_FILES_PAGE_SIZE,
   MAX_FILES_PAGE_SIZE,
@@ -34,6 +34,11 @@ export const UploadFileInputSchema = z.object({
 
 export const DownloadFileInputSchema = z.object({
   itemId: z.string().min(1),
+  outputPath: z.string().min(1),
+});
+
+export const DownloadSharedFileInputSchema = z.object({
+  shareUrl: z.string().url(),
   outputPath: z.string().min(1),
 });
 
@@ -113,6 +118,19 @@ const downloadFileToolDefinition: Tool = {
   },
 };
 
+const downloadSharedFileToolDefinition: Tool = {
+  name: 'teams_download_shared_file',
+  description: 'Download a file shared in a Teams conversation by its SharePoint/OneDrive URL (e.g. the webUrl from teams_get_shared_files). Works for files from other users\' drives that you have been granted access to. Use teams_download_file instead for files in your own OneDrive.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      shareUrl: { type: 'string', description: 'The SharePoint/OneDrive web URL of the file (webUrl from teams_get_shared_files).' },
+      outputPath: { type: 'string', description: 'Local path to write the downloaded file to.' },
+    },
+    required: ['shareUrl', 'outputPath'],
+  },
+};
+
 const sendFileToolDefinition: Tool = {
   name: 'teams_send_file',
   description: 'Send a local file into a Teams conversation as a native file attachment. This is the correct way to share a file: it posts a real file chiclet (icon, preview, open in Teams) that also appears in the conversation\'s Files tab, not just a link. The file is uploaded to the right place automatically: a channel\'s own SharePoint files folder for channels, or your OneDrive "Microsoft Teams Chat Files" (shared via an org link) for 1:1, group, meeting and self chats. Works for all conversation types. Add an optional caption as the message text. Confirm the content with the user before sending.',
@@ -166,6 +184,13 @@ async function handleDownloadFile(
   return handleApiResult(await downloadFile(input.itemId, input.outputPath), (v) => ({ ...v, message: 'File downloaded.' }));
 }
 
+async function handleDownloadSharedFile(
+  input: z.infer<typeof DownloadSharedFileInputSchema>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  return handleApiResult(await downloadSharedFile(input.shareUrl, input.outputPath), (v) => ({ ...v, message: 'File downloaded.' }));
+}
+
 async function handleSendFile(
   input: z.infer<typeof SendFileInputSchema>,
   _ctx: ToolContext
@@ -216,6 +241,9 @@ export const uploadFileTool: RegisteredTool<typeof UploadFileInputSchema> = {
 export const downloadFileTool: RegisteredTool<typeof DownloadFileInputSchema> = {
   definition: downloadFileToolDefinition, schema: DownloadFileInputSchema, handler: handleDownloadFile,
 };
+export const downloadSharedFileTool: RegisteredTool<typeof DownloadSharedFileInputSchema> = {
+  definition: downloadSharedFileToolDefinition, schema: DownloadSharedFileInputSchema, handler: handleDownloadSharedFile,
+};
 export const sendFileTool: RegisteredTool<typeof SendFileInputSchema> = {
   definition: sendFileToolDefinition, schema: SendFileInputSchema, handler: handleSendFile,
 };
@@ -224,4 +252,4 @@ export const sendFilesTool: RegisteredTool<typeof SendFilesInputSchema> = {
 };
 
 /** All file-related tools. */
-export const fileTools = [getSharedFilesTool, listFilesTool, uploadFileTool, downloadFileTool, sendFileTool, sendFilesTool];
+export const fileTools = [getSharedFilesTool, listFilesTool, uploadFileTool, downloadFileTool, downloadSharedFileTool, sendFileTool, sendFilesTool];
