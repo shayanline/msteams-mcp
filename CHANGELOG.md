@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-06-23
+
+### Added
+- `teams_download_shared_file`: download a file shared in a Teams conversation by its SharePoint/OneDrive URL (the `webUrl` from `teams_get_shared_files`). Works for files from other users' drives that you have been granted access to, using the Microsoft Graph Shares API. Use `teams_download_file` for files in your own OneDrive.
+
 ## [0.28.0] - 2026-06-18
 
 ### Added
@@ -49,7 +54,8 @@ All notable changes to this project are documented here. The format is based on
 
 See the [GitHub releases](https://github.com/shayanline/msteams-mcp/releases) for the history before independent maintenance began.
 
-[Unreleased]: https://github.com/shayanline/msteams-mcp/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/shayanline/msteams-mcp/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/shayanline/msteams-mcp/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/shayanline/msteams-mcp/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/shayanline/msteams-mcp/compare/v0.26.1...v0.27.0
 [0.26.1]: https://github.com/shayanline/msteams-mcp/compare/v0.26.0...v0.26.1
