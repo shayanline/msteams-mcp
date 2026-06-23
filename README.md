@@ -91,7 +91,7 @@ The server uses your system's Chrome (macOS/Linux) or Edge (Windows) for authent
 | `teams_send_message` | Send a message (default: self-chat/notes). Use `replyToMessageId` for thread replies, `importance` (high/urgent) for priority, `subject` for a channel post title |
 | `teams_edit_message` | Edit one of your own messages |
 | `teams_delete_message` | Delete one of your own messages (soft delete) |
-| `teams_forward_message` | Forward a message to another conversation as a quoted block, with an optional note |
+| `teams_forward_message` | Forward a message to another conversation. Preserves the quoted block (sender + content) and carries original file attachments as native chiclets with no re-upload. An optional `comment` is prepended above the quote |
 
 ### People & Contacts
 
@@ -172,6 +172,7 @@ The server uses your system's Chrome (macOS/Linux) or Edge (Windows) for authent
 | `teams_list_files` | Browse files and folders in your OneDrive |
 | `teams_upload_file` | Upload a local file to your OneDrive (up to 250 MB) |
 | `teams_download_file` | Download a OneDrive file by item id to a local path |
+| `teams_download_shared_file` | Download a file shared in a Teams conversation by its SharePoint/OneDrive URL (e.g. from `teams_get_shared_files`). Works for files from other users' drives that you have access to |
 | `teams_send_file` | Send a local file into a conversation as a native attachment (real file chiclet, also appears in the Files tab) |
 | `teams_send_files` | Send several local files into a conversation as native attachments on a single message (one message, multiple file chiclets) |
 

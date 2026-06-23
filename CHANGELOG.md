@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.29.1] - 2026-06-23
+
+### Added
+- `teams_get_message` now returns `rawHtml` (original HTML content before stripping) and `rawFileObjects` (the parsed file chiclet array from `properties.files`), making it possible to inspect or re-post a message's exact content and attachments.
+
+### Changed
+- `teams_forward_message` now carries file attachments from the source message into the target conversation as native chiclets, with no download or re-upload. The original file objects are passed directly, preserving the original filename and SharePoint URL. The hardcoded "Forwarded message:" label has been removed — only the quoted block (sender name + content) is included by default. The optional `comment` parameter still prepends a note above the quote.
+
 ## [0.29.0] - 2026-06-23
 
 ### Added
@@ -54,7 +62,8 @@ All notable changes to this project are documented here. The format is based on
 
 See the [GitHub releases](https://github.com/shayanline/msteams-mcp/releases) for the history before independent maintenance began.
 
-[Unreleased]: https://github.com/shayanline/msteams-mcp/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/shayanline/msteams-mcp/compare/v0.29.1...HEAD
+[0.29.1]: https://github.com/shayanline/msteams-mcp/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/shayanline/msteams-mcp/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/shayanline/msteams-mcp/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/shayanline/msteams-mcp/compare/v0.26.1...v0.27.0
