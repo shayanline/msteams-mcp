@@ -263,6 +263,37 @@ describe('httpRequest', () => {
     expect(vi.mocked(fetch)).toHaveBeenCalled();
   });
 
+  it('prunes an expired rate-limit entry instead of leaking it indefinitely', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        new Response('Rate Limited', { status: 429, headers: { 'Retry-After': '1' } })
+      );
+
+      // Trigger a 1s rate limit for this host. maxRetries: 1 avoids retrying.
+      await httpRequest('https://api.example.com/data', { maxRetries: 1 });
+
+      // Immediately after, the same host is still blocked without calling fetch.
+      vi.mocked(fetch).mockClear();
+      const blocked = await httpRequest('https://api.example.com/data');
+      expect(blocked.ok).toBe(false);
+      expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+
+      // Once the window has passed, the stale entry is pruned and the host is
+      // no longer blocked (this also exercises the delete-on-expiry path, not
+      // just the "already not present" case).
+      await vi.advanceTimersByTimeAsync(1500);
+      vi.mocked(fetch).mockResolvedValueOnce(
+        new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+      );
+      const afterExpiry = await httpRequest('https://api.example.com/data');
+      expect(afterExpiry.ok).toBe(true);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('honours Retry-After as the delay for the next attempt within the same request', async () => {
     vi.useFakeTimers();
     try {

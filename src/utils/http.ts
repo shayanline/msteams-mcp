@@ -30,13 +30,13 @@ export interface HttpResponse<T = unknown> {
   data: T;
 }
 
-/** Rate limit state tracking, keyed by hostname so one throttled API doesn't block the rest. */
+/** Rate limit state tracking, keyed by host so one throttled API doesn't block the rest. */
 const rateLimitedUntil = new Map<string, number>();
 
 /**
- * Returns the hostname to key rate-limit state by. Falls back to the full URL
- * if it can't be parsed as an absolute URL, so an invalid input never crashes
- * the request path.
+ * Returns the host (hostname plus port, if any) to key rate-limit state by.
+ * Falls back to the full URL if it can't be parsed as an absolute URL, so an
+ * invalid input never crashes the request path.
  */
 function getRateLimitKey(url: string): string {
   try {
@@ -44,6 +44,21 @@ function getRateLimitKey(url: string): string {
   } catch {
     return url;
   }
+}
+
+/**
+ * Returns the active rate-limit expiry for a key, if any. Deletes the entry
+ * first if it has already passed, so a long-running process that talks to
+ * many distinct hosts doesn't accumulate stale keys indefinitely.
+ */
+function getActiveRateLimitExpiry(key: string): number | undefined {
+  const expiry = rateLimitedUntil.get(key);
+  if (expiry === undefined) return undefined;
+  if (Date.now() >= expiry) {
+    rateLimitedUntil.delete(key);
+    return undefined;
+  }
+  return expiry;
 }
 
 /**
@@ -64,8 +79,8 @@ export async function httpRequest<T = unknown>(
   const rateLimitKey = getRateLimitKey(url);
 
   // Check rate limit state
-  const rateLimitExpiry = rateLimitedUntil.get(rateLimitKey);
-  if (rateLimitExpiry && Date.now() < rateLimitExpiry) {
+  const rateLimitExpiry = getActiveRateLimitExpiry(rateLimitKey);
+  if (rateLimitExpiry !== undefined) {
     const waitMs = rateLimitExpiry - Date.now();
     return err(createError(
       ErrorCode.RATE_LIMITED,
