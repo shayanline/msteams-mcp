@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.29.2] - 2026-07-01
+
+### Fixed
+- Markdown to Teams HTML: a line consisting solely of a bold label (e.g. `**Target**`) is now rendered as its own paragraph instead of being joined to the following line with a `<br>`, so a heading sits directly above its content without needing a blank-line workaround. Handles indented labels and trailing hard-break markers correctly.
+- `teams_find_meeting_times` now returns unambiguous UTC timestamps. It previously returned times in the mailbox's local timezone with no offset marker, which could be misread as UTC and lead to meetings suggested or scheduled at the wrong time for anyone not on a UTC mailbox.
+- HTTP 403 responses are now classified as a permissions error rather than an authentication error. Previously a genuine "you don't have permission" failure (e.g. deleting a channel you don't own, deleting someone else's message without moderator rights) triggered an unnecessary automatic re-login attempt followed by a misleading "call teams_login" suggestion.
+- HTTP rate limiting is now tracked per API host instead of globally, so a 429 from one API (e.g. the calendar API) no longer blocks unrelated calls to other APIs (e.g. search or messaging) for the duration of the `Retry-After` window. The client also now honours the server's `Retry-After` value for its own retries (previously it fell back to generic exponential backoff regardless), and the recorded rate-limit window is correctly capped to match the delay actually used.
+- Token refresh no longer discards already-successfully-refreshed tokens when a later scope fails with an auth error (e.g. missing consent for one specific API). Previously this silently threw away progress made on the other scopes and forced a slower browser-based re-authentication fallback even when most tokens had already refreshed successfully.
+- Fixed several smaller robustness issues found during a codebase review: a missing barrel export for task and channel management tools, a browser process left running after a failed authentication attempt, an HTML entity decode-order bug that could over-decode double-encoded content, an unguarded `decodeURIComponent` call that could throw on a malformed session cookie, and unbounded `maxResults` search input that could silently drop results instead of erroring on invalid input.
+
+### Changed
+- CI pipeline: lint, typecheck and build now run once in a dedicated job instead of once per Node version; the test matrix now covers Node 22, 24 and 26 (dropped Node 20, which is past active support) and depends on the lint/build job passing first; test coverage is now enforced in CI; `actions/checkout` and `actions/setup-node` updated to their latest major versions.
+- Removed the automated AI PR-reviewer workflow, which depended on GitHub App credentials that were never configured for this fork and caused every pull request to show a failing check.
+
 ## [0.29.1] - 2026-06-23
 
 ### Added
@@ -62,7 +76,8 @@ All notable changes to this project are documented here. The format is based on
 
 See the [GitHub releases](https://github.com/shayanline/msteams-mcp/releases) for the history before independent maintenance began.
 
-[Unreleased]: https://github.com/shayanline/msteams-mcp/compare/v0.29.1...HEAD
+[Unreleased]: https://github.com/shayanline/msteams-mcp/compare/v0.29.2...HEAD
+[0.29.2]: https://github.com/shayanline/msteams-mcp/compare/v0.29.1...v0.29.2
 [0.29.1]: https://github.com/shayanline/msteams-mcp/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/shayanline/msteams-mcp/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/shayanline/msteams-mcp/compare/v0.27.0...v0.28.0
