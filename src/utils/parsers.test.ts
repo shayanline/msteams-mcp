@@ -901,6 +901,39 @@ describe('markdownToTeamsHtml', () => {
     );
   });
 
+  it('renders a bold-only label line followed immediately by text as separate blocks', () => {
+    // A bold heading like **Target** on its own line must not be joined to the next
+    // line with a <br>. It should flush as its own <p> so the content sits directly
+    // below the heading with no cramping.
+    expect(markdownToTeamsHtml('**Target**\nFirst paying customer within four months.')).toBe(
+      '<p><b>Target</b></p><p>First paying customer within four months.</p>'
+    );
+  });
+
+  it('strips trailing two-space hard-break markers before rendering', () => {
+    // Trailing "  " (two spaces) is a markdown hard-break signal; it should not
+    // bleed into the rendered HTML as visible whitespace.
+    expect(markdownToTeamsHtml('**Target**  \nFirst paying customer.')).toBe(
+      '<p><b>Target</b></p><p>First paying customer.</p>'
+    );
+  });
+
+  it('renders a realistic meeting-summary section correctly', () => {
+    const input = [
+      '**Why we are building this**',
+      'The core gap is phone call data.',
+      '',
+      '**Target**',
+      'First paying customer within four months.',
+    ].join('\n');
+    expect(markdownToTeamsHtml(input)).toBe(
+      '<p><b>Why we are building this</b></p>' +
+      '<p>The core gap is phone call data.</p>' +
+      '<p><b>Target</b></p>' +
+      '<p>First paying customer within four months.</p>'
+    );
+  });
+
   it('returns empty paragraph for empty string', () => {
     expect(markdownToTeamsHtml('')).toBe('<p></p>');
   });
