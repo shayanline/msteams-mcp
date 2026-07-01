@@ -318,6 +318,54 @@ describe('refreshTokensViaHttp', () => {
     }
   });
 
+  it('persists already-refreshed tokens when a later scope returns AUTH_EXPIRED', async () => {
+    // REFRESH_SCOPES order: substrate, api.spaces.skype.com, chatsvcagg, graph.
+    // Simulate the first two scopes succeeding, then Conditional Access / missing
+    // consent denying graph.microsoft.com specifically with an auth error. The
+    // successful refreshes for the earlier scopes must still be persisted.
+    const state = makeMockSessionState();
+    vi.mocked(readSessionState).mockReturnValue(state);
+    vi.mocked(getTeamsOrigin).mockReturnValue(state.origins[0]);
+
+    let callCount = 0;
+    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL) => {
+      const urlStr = String(url);
+      if (urlStr.includes('login.microsoftonline.com')) {
+        callCount++;
+        if (callCount === 4) {
+          // Fourth scope (graph.microsoft.com) fails with an auth error
+          return new Response(JSON.stringify({
+            error: 'invalid_grant',
+            error_description: 'AADSTS65001: The user or administrator has not consented.',
+          }), { status: 400 });
+        }
+        return new Response(JSON.stringify(makeTokenResponse('scope')), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (urlStr.includes('authsvc.teams.microsoft.com')) {
+        return new Response(JSON.stringify({
+          tokens: { skypeToken: 'new-skype-token', expiresIn: 86400 },
+        }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response('', { status: 500 });
+    });
+
+    const result = await refreshTokensViaHttp();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // 3 of 4 scopes succeeded (graph failed with an auth error)
+      expect(result.value.tokensRefreshed).toBe(3);
+    }
+    // The successful refreshes must still be written to session state, not
+    // discarded because one later scope hit an auth error.
+    expect(writeSessionState).toHaveBeenCalled();
+    expect(clearTokenCache).toHaveBeenCalled();
+  });
+
   it('handles skype token exchange failure gracefully', async () => {
     const state = makeMockSessionState();
     vi.mocked(readSessionState).mockReturnValue(state);

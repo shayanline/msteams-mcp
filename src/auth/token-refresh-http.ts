@@ -668,15 +668,20 @@ export async function refreshTokensViaHttp(): Promise<Result<HttpRefreshResult>>
     );
 
     if (!result.ok) {
-      // If any refresh fails with auth error, the refresh token is likely expired
-      if (result.error.code === ErrorCode.AUTH_EXPIRED) {
+      // If AUTH_EXPIRED happens before any scope has succeeded, the refresh
+      // token itself is almost certainly dead and every other scope would fail
+      // the same way, so abort immediately rather than making pointless requests.
+      if (result.error.code === ErrorCode.AUTH_EXPIRED && tokensRefreshed === 0) {
         return err(createError(
           ErrorCode.AUTH_EXPIRED,
           `HTTP token refresh failed for ${scope.resource}: ${result.error.message}. Browser login required.`,
           { suggestions: ['Call teams_login to re-authenticate via browser'] }
         ));
       }
-      // For other errors (network, timeout), log and continue with remaining scopes
+      // Otherwise (network/timeout errors, or AUTH_EXPIRED for a single resource
+      // after other scopes already succeeded, e.g. missing consent/Conditional
+      // Access for just that one API) log and continue so the successfully
+      // refreshed tokens for the other scopes are still persisted below.
       log.warn('token-refresh-http', `Failed to refresh ${scope.resource}: ${result.error.message}`);
       scopeErrors.push(`${scope.resource}: ${result.error.message}`);
       continue;
