@@ -96,7 +96,9 @@ describe('httpRequest', () => {
       })
     );
 
-    const result = await httpRequest('https://api.example.com/data');
+    // maxRetries: 1 avoids waiting out the real 5s Retry-After delay between
+    // attempts; this test only cares about the shape of the returned error.
+    const result = await httpRequest('https://api.example.com/data', { maxRetries: 1 });
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -221,8 +223,10 @@ describe('httpRequest', () => {
       })
     );
 
-    // First request triggers rate limit state
-    await httpRequest('https://api.example.com/data');
+    // First request triggers rate limit state. maxRetries: 1 means there is no
+    // retry loop at all for this call, so no delay is incurred regardless of
+    // the Retry-After value or the retryMaxDelayMs cap.
+    await httpRequest('https://api.example.com/data', { maxRetries: 1 });
 
     // Replace fetch mock for the second request to verify rate limit check
     vi.mocked(fetch).mockClear();
@@ -236,6 +240,132 @@ describe('httpRequest', () => {
     }
     // Should not have called fetch since we were rate limited
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it('scopes rate limit state to the host that returned 429, not other hosts', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response('Rate Limited', {
+        status: 429,
+        headers: { 'Retry-After': '60' },
+      })
+    );
+
+    // Trigger rate limit state for one host. maxRetries: 1 means there is no
+    // retry loop at all for this call, so no delay is incurred regardless of
+    // the Retry-After value or the retryMaxDelayMs cap.
+    await httpRequest('https://substrate.office.com/v2/query', { maxRetries: 1 });
+
+    // A different, unrelated host should not be blocked by that rate limit
+    vi.mocked(fetch).mockClear();
+    vi.mocked(fetch).mockResolvedValue(
+      new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+    );
+
+    const result = await httpRequest('https://graph.microsoft.com/v1.0/me');
+
+    expect(result.ok).toBe(true);
+    expect(vi.mocked(fetch)).toHaveBeenCalled();
+  });
+
+  it('prunes an expired rate-limit entry instead of leaking it indefinitely', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        new Response('Rate Limited', { status: 429, headers: { 'Retry-After': '1' } })
+      );
+
+      // Trigger a 1s rate limit for this host. maxRetries: 1 avoids retrying.
+      await httpRequest('https://api.example.com/data', { maxRetries: 1 });
+
+      // Immediately after, the same host is still blocked without calling fetch.
+      vi.mocked(fetch).mockClear();
+      const blocked = await httpRequest('https://api.example.com/data');
+      expect(blocked.ok).toBe(false);
+      expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+
+      // Once the window has passed, the stale entry is pruned and the host is
+      // no longer blocked (this also exercises the delete-on-expiry path, not
+      // just the "already not present" case).
+      await vi.advanceTimersByTimeAsync(1500);
+      vi.mocked(fetch).mockResolvedValueOnce(
+        new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+      );
+      const afterExpiry = await httpRequest('https://api.example.com/data');
+      expect(afterExpiry.ok).toBe(true);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('honours Retry-After as the delay for the next attempt within the same request', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(
+          new Response('Rate Limited', { status: 429, headers: { 'Retry-After': '3' } })
+        )
+        .mockResolvedValueOnce(
+          new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+        );
+
+      const promise = httpRequest('https://api.example.com/data', { maxRetries: 2 });
+
+      // First attempt fires immediately and comes back 429.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+
+      // Before the full 3s Retry-After window elapses, the retry must not fire yet
+      // (the old exponential-backoff-only delay would have fired well before this).
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+
+      // Once the Retry-After window elapses, the retry fires.
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+
+      const result = await promise;
+      expect(result.ok).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('caps the recorded rate-limit window to match the actual retry delay used', async () => {
+    // The server asks for a 60s Retry-After, but the default retryMaxDelayMs
+    // (10s) caps the actual sleep before this request's own next attempt. The
+    // window recorded in the shared rate-limit map must use that same capped
+    // value; otherwise a brand new call made right after this one succeeds
+    // would be blocked for up to 60s by a window that had already, in effect,
+    // been ignored by this request's own retry loop.
+    vi.useFakeTimers();
+    try {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(
+          new Response('Rate Limited', { status: 429, headers: { 'Retry-After': '60' } })
+        )
+        .mockResolvedValueOnce(
+          new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+        );
+
+      const promise = httpRequest('https://api.example.com/data', { maxRetries: 2 });
+      await vi.advanceTimersByTimeAsync(10000);
+      const result = await promise;
+      expect(result.ok).toBe(true);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+
+      // A brand new call to the same host, made right after the retry
+      // succeeded, must not be blocked by a stale 60s window.
+      vi.mocked(fetch).mockClear();
+      vi.mocked(fetch).mockResolvedValueOnce(
+        new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+      );
+      const followUp = await httpRequest('https://api.example.com/data');
+      expect(followUp.ok).toBe(true);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('handles plain text response', async () => {
@@ -281,8 +411,10 @@ describe('clearRateLimitState', () => {
       })
     ));
 
-    // First request triggers rate limit
-    await httpRequest('https://api.example.com/data');
+    // First request triggers rate limit. maxRetries: 1 means there is no retry
+    // loop at all for this call, so no delay is incurred regardless of the
+    // Retry-After value or the retryMaxDelayMs cap.
+    await httpRequest('https://api.example.com/data', { maxRetries: 1 });
 
     // Clear the rate limit state
     clearRateLimitState();
@@ -381,6 +513,40 @@ describe('httpRequest - additional branch coverage', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('RATE_LIMITED');
+  });
+
+  it('honours a Retry-After of exactly 0 by retrying immediately, not via backoff', async () => {
+    // retryAfterMs of 0 is falsy in JS. If the delay selection used a truthiness
+    // check instead of an explicit undefined check, a 0ms Retry-After would be
+    // ignored and the retry would instead wait out the (much longer) exponential
+    // backoff delay for this attempt.
+    vi.useFakeTimers();
+    try {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(
+          new Response('Rate Limited', { status: 429, headers: { 'Retry-After': '0' } })
+        )
+        .mockResolvedValueOnce(
+          new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+        );
+
+      const promise = httpRequest('https://api.example.com/data', {
+        maxRetries: 2,
+        retryBaseDelayMs: 5000,
+      });
+
+      // Only advance a negligible amount of time. With a 0ms Retry-After, the
+      // retry must have already fired; the buggy fallback (exponential backoff
+      // starting at retryBaseDelayMs) would need at least ~2500ms (half-jitter
+      // minimum) before firing.
+      await vi.advanceTimersByTimeAsync(1);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+
+      const result = await promise;
+      expect(result.ok).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('returns an UNKNOWN error when maxRetries is 0 (loop body never runs)', async () => {

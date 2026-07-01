@@ -30,8 +30,45 @@ export interface HttpResponse<T = unknown> {
   data: T;
 }
 
-/** Rate limit state tracking. */
-let rateLimitedUntil: number | null = null;
+/** Rate limit state tracking, keyed by host so one throttled API doesn't block the rest. */
+const rateLimitedUntil = new Map<string, number>();
+
+/**
+ * Returns the host (hostname plus port, if any) to key rate-limit state by.
+ * Falls back to the full URL if it can't be parsed as an absolute URL, so an
+ * invalid input never crashes the request path.
+ */
+function getRateLimitKey(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Returns the active rate-limit expiry for a key, if any, relative to `now`.
+ * Deletes the entry first if it has already passed. This only prunes lazily,
+ * on the next lookup of that same key: a host that gets rate-limited once and
+ * is never requested again will leave its (expired) entry in the map. Given
+ * the small, fixed set of hosts this client ever talks to, that's an
+ * acceptable bound rather than a real leak, but it is not a general-purpose
+ * sweep of the whole map.
+ *
+ * Taking `now` as a parameter (rather than calling Date.now() again here)
+ * guarantees the caller's own "time remaining" calculation is against the
+ * exact same instant used to decide the entry is still active, so it can
+ * never come back zero or negative.
+ */
+function getActiveRateLimitExpiry(key: string, now: number): number | undefined {
+  const expiry = rateLimitedUntil.get(key);
+  if (expiry === undefined) return undefined;
+  if (now >= expiry) {
+    rateLimitedUntil.delete(key);
+    return undefined;
+  }
+  return expiry;
+}
 
 /**
  * Makes an HTTP request with timeout, retry, and error handling.
@@ -48,9 +85,15 @@ export async function httpRequest<T = unknown>(
     ...fetchOptions
   } = options;
 
-  // Check rate limit state
-  if (rateLimitedUntil && Date.now() < rateLimitedUntil) {
-    const waitMs = rateLimitedUntil - Date.now();
+  const rateLimitKey = getRateLimitKey(url);
+
+  // Check rate limit state. waitMs is computed from the same `now` used to
+  // decide the entry is still active, so it can never come back zero/negative
+  // (which could otherwise happen if the entry expired between the two calls).
+  const now = Date.now();
+  const rateLimitExpiry = getActiveRateLimitExpiry(rateLimitKey, now);
+  if (rateLimitExpiry !== undefined) {
+    const waitMs = rateLimitExpiry - now;
     return err(createError(
       ErrorCode.RATE_LIMITED,
       `Rate limited. Retry after ${Math.ceil(waitMs / 1000)}s`,
@@ -70,9 +113,23 @@ export async function httpRequest<T = unknown>(
 
       lastError = result.error;
 
-      // Handle rate limiting
-      if (result.error.code === ErrorCode.RATE_LIMITED && result.error.retryAfterMs) {
-        rateLimitedUntil = Date.now() + result.error.retryAfterMs;
+      // Retry-After is bounded by retryMaxDelayMs, since that is the actual
+      // delay used both for this request's own next attempt below and for the
+      // window recorded into rateLimitedUntil. Using the same capped value in
+      // both places keeps them consistent: without this, a large server-
+      // provided Retry-After (e.g. 60s) could be recorded in full for future
+      // calls to block on, while this request's own retry loop (which only
+      // checks the rate-limit map once, before the loop starts) would still
+      // retry after the shorter capped delay, bypassing the very window it
+      // just recorded.
+      const cappedRetryAfterMs = result.error.retryAfterMs !== undefined
+        ? Math.min(result.error.retryAfterMs, retryMaxDelayMs)
+        : undefined;
+
+      // Handle rate limiting. Check for undefined rather than truthiness so a
+      // valid "Retry-After: 0" is still recorded instead of being ignored.
+      if (result.error.code === ErrorCode.RATE_LIMITED && cappedRetryAfterMs !== undefined) {
+        rateLimitedUntil.set(rateLimitKey, Date.now() + cappedRetryAfterMs);
       }
 
       // Don't retry non-retryable errors
@@ -85,13 +142,14 @@ export async function httpRequest<T = unknown>(
         return result;
       }
 
-      // Calculate backoff delay with jitter to avoid thundering herd
-      const baseDelay = Math.min(
-        retryBaseDelayMs * Math.pow(2, attempt - 1),
-        retryMaxDelayMs
-      );
-      const delay = baseDelay * (0.5 + Math.random() * 0.5);
-      
+      // Honour the server's Retry-After for the next attempt of this same request
+      // (checking for undefined rather than truthiness so a valid 0ms value is
+      // still honoured instead of falling through to backoff); otherwise fall
+      // back to exponential backoff with jitter to avoid thundering herd.
+      const delay = cappedRetryAfterMs !== undefined
+        ? cappedRetryAfterMs
+        : Math.min(retryBaseDelayMs * Math.pow(2, attempt - 1), retryMaxDelayMs) * (0.5 + Math.random() * 0.5);
+
       await sleep(delay);
       
     } catch (error) {
@@ -201,5 +259,5 @@ function sleep(ms: number): Promise<void> {
  * Clears the rate limit state (for testing).
  */
 export function clearRateLimitState(): void {
-  rateLimitedUntil = null;
+  rateLimitedUntil.clear();
 }
