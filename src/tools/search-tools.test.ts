@@ -19,7 +19,14 @@ vi.mock('../api/chatsvc-api.js', () => ({
 
 import { searchMessages, searchEmails, searchChannels } from '../api/substrate-api.js';
 import { getThreadMessages, getConsumptionHorizon, markAsRead } from '../api/chatsvc-api.js';
-import { searchTool, getThreadTool, findChannelTool, searchEmailTool } from './search-tools.js';
+import {
+  searchTool,
+  getThreadTool,
+  findChannelTool,
+  searchEmailTool,
+  SearchInputSchema,
+  SearchEmailInputSchema,
+} from './search-tools.js';
 
 const ctx = { server: {} } as never;
 const anErr = err(createError(ErrorCode.API_ERROR, 'boom'));
@@ -27,6 +34,24 @@ const anErr = err(createError(ErrorCode.API_ERROR, 'boom'));
 const pagination = (hasMore: boolean) => ({ from: 0, size: 25, returned: 2, total: 10, hasMore });
 
 beforeEach(() => vi.clearAllMocks());
+
+describe('SearchInputSchema / SearchEmailInputSchema', () => {
+  it('rejects a negative maxResults instead of silently accepting it', () => {
+    // A negative maxResults previously flowed straight into Array.slice(0, maxResults),
+    // which counts from the end of the array for negative values, silently dropping
+    // items instead of erroring on invalid input.
+    expect(SearchInputSchema.safeParse({ query: 'hi', maxResults: -1 }).success).toBe(false);
+    expect(SearchEmailInputSchema.safeParse({ query: 'hi', maxResults: -1 }).success).toBe(false);
+  });
+
+  it('rejects a maxResults above MAX_PAGE_SIZE', () => {
+    expect(SearchInputSchema.safeParse({ query: 'hi', maxResults: 100000 }).success).toBe(false);
+  });
+
+  it('accepts a valid maxResults', () => {
+    expect(SearchInputSchema.safeParse({ query: 'hi', maxResults: 10 }).success).toBe(true);
+  });
+});
 
 describe('searchTool', () => {
   it('returns results with nextFrom when hasMore', async () => {

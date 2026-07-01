@@ -603,8 +603,15 @@ export function extractMessageAuth(state?: SessionState): MessageAuthInfo | null
   
   if (!skypeToken || !rawAuthToken) return null;
 
-  // Decode authtoken (URL-encoded, may have 'Bearer=' prefix)
-  let authToken = decodeURIComponent(rawAuthToken);
+  // Decode authtoken (URL-encoded, may have 'Bearer=' prefix). Guard against a
+  // malformed cookie value (e.g. corrupted session state) throwing a URIError,
+  // consistent with the defensive parsing used elsewhere in this file.
+  let authToken: string;
+  try {
+    authToken = decodeURIComponent(rawAuthToken);
+  } catch {
+    return null;
+  }
   if (authToken.startsWith('Bearer=')) {
     authToken = authToken.substring(7);
   }

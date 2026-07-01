@@ -590,6 +590,21 @@ describe('extractMessageAuth', () => {
     };
     expect(extractMessageAuth(state)).toBeNull();
   });
+
+  it('returns null instead of throwing when the authtoken cookie is malformed', () => {
+    // A lone "%" is not a valid URI escape sequence and would make
+    // decodeURIComponent throw a URIError if unguarded.
+    const skypeToken = makeJwt({ sub: 'nope' });
+    const state: SessionState = {
+      origins: [],
+      cookies: [
+        { name: 'skypetoken_asm', value: skypeToken, domain: 'teams.microsoft.com' },
+        { name: 'authtoken', value: 'Bearer=%', domain: 'teams.microsoft.com' },
+      ],
+    };
+    expect(() => extractMessageAuth(state)).not.toThrow();
+    expect(extractMessageAuth(state)).toBeNull();
+  });
 });
 
 describe('getMessageAuthStatus', () => {

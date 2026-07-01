@@ -24,7 +24,7 @@ import {
 
 export const SearchInputSchema = z.object({
   query: z.string().min(1, 'Query cannot be empty'),
-  maxResults: z.number().optional().default(DEFAULT_PAGE_SIZE),
+  maxResults: z.number().min(1).max(MAX_PAGE_SIZE).optional().default(DEFAULT_PAGE_SIZE),
   from: z.number().min(0).optional().default(0),
   size: z.number().min(1).max(MAX_PAGE_SIZE).optional().default(DEFAULT_PAGE_SIZE),
 });
@@ -44,7 +44,7 @@ export const FindChannelInputSchema = z.object({
 
 export const SearchEmailInputSchema = z.object({
   query: z.string().min(1, 'Query cannot be empty'),
-  maxResults: z.number().optional().default(DEFAULT_PAGE_SIZE),
+  maxResults: z.number().min(1).max(MAX_PAGE_SIZE).optional().default(DEFAULT_PAGE_SIZE),
   from: z.number().min(0).optional().default(0),
   size: z.number().min(1).max(MAX_PAGE_SIZE).optional().default(DEFAULT_PAGE_SIZE),
 });
