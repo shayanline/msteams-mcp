@@ -582,8 +582,10 @@ describe('findMeetingTimes', () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.value.suggestions[0]).toMatchObject({
-      start: '2026-06-05T10:00:00',
-      end: '2026-06-05T10:30:00',
+      // The response omits timeZone; findMeetingTimes requests Prefer: outlook.timezone="UTC",
+      // so toUtcIso() marks the dateTime as UTC with a trailing Z rather than leaving it ambiguous.
+      start: '2026-06-05T10:00:00Z',
+      end: '2026-06-05T10:30:00Z',
       confidence: 100,
       organizerAvailability: 'free',
     });
@@ -592,6 +594,9 @@ describe('findMeetingTimes', () => {
     const sent = JSON.parse((mockHttp.mock.calls[0][1] as { body: string }).body);
     expect(sent.meetingDuration).toBe('PT45M');
     expect(sent.maxCandidates).toBe(3);
+    expect((mockHttp.mock.calls[0][1] as { headers: Record<string, string> }).headers['Prefer']).toBe(
+      'outlook.timezone="UTC"'
+    );
   });
 
   it('applies fallbacks for missing fields and default options', async () => {

@@ -70,4 +70,6 @@ export * from './auth-tools.js';
 export * from './meeting-tools.js';
 export * from './file-tools.js';
 export * from './tag-tools.js';
+export * from './task-tools.js';
+export * from './channel-tools.js';
 export * from './registry.js';

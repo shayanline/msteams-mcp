@@ -11,6 +11,8 @@ export enum ErrorCode {
   AUTH_REQUIRED = 'AUTH_REQUIRED',
   /** Token has expired and needs refresh. */
   AUTH_EXPIRED = 'AUTH_EXPIRED',
+  /** Authenticated, but not permitted to perform this action (HTTP 403). */
+  FORBIDDEN = 'FORBIDDEN',
   /** Rate limited by the API. */
   RATE_LIMITED = 'RATE_LIMITED',
   /** Requested resource was not found. */
@@ -83,6 +85,12 @@ function getDefaultSuggestions(code: ErrorCode): string[] {
         'Do NOT skip this step or tell the user Teams is unavailable',
         'After login succeeds, retry the original request',
       ];
+    case ErrorCode.FORBIDDEN:
+      return [
+        'This is a permissions issue, not an authentication issue. Do NOT call teams_login.',
+        'Check the user has the required role/permission for this action (e.g. channel owner, message author)',
+        'Tell the user they lack permission rather than retrying',
+      ];
     case ErrorCode.RATE_LIMITED:
       return ['Wait before retrying', 'Reduce request frequency'];
     case ErrorCode.NOT_FOUND:
@@ -125,7 +133,7 @@ export function classifyHttpError(status: number, message?: string): ErrorCode {
     case 401:
       return ErrorCode.AUTH_EXPIRED;
     case 403:
-      return ErrorCode.AUTH_REQUIRED;
+      return ErrorCode.FORBIDDEN;
     case 404:
       return ErrorCode.NOT_FOUND;
     case 429:
