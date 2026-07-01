@@ -801,7 +801,7 @@ export async function findMeetingTimes(
     GRAPH_CALENDAR_API.findMeetingTimes(),
     {
       method: 'POST',
-      headers: getGraphHeaders(graphToken),
+      headers: { ...getGraphHeaders(graphToken), 'Prefer': GRAPH_UTC_PREFER },
       body: JSON.stringify(body),
     }
   );
@@ -812,11 +812,11 @@ export async function findMeetingTimes(
   const raw = (data.meetingTimeSuggestions ?? []) as Array<Record<string, unknown>>;
 
   const suggestions: MeetingTimeSuggestion[] = raw.map((s) => {
-    const slot = (s.meetingTimeSlot ?? {}) as Record<string, { dateTime?: string }>;
+    const slot = (s.meetingTimeSlot ?? {}) as Record<string, { dateTime?: string; timeZone?: string }>;
     const attendees = (s.attendeeAvailability ?? []) as Array<Record<string, unknown>>;
     return {
-      start: slot.start?.dateTime ?? '',
-      end: slot.end?.dateTime ?? '',
+      start: toUtcIso(slot.start),
+      end: toUtcIso(slot.end),
       confidence: s.confidence as number | undefined,
       organizerAvailability: s.organizerAvailability as string | undefined,
       attendeeAvailability: attendees.map((a) => ({
