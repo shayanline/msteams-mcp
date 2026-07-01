@@ -934,6 +934,14 @@ describe('markdownToTeamsHtml', () => {
     );
   });
 
+  it('detects a bold-only label with leading whitespace as its own block', () => {
+    // "  **Target**" (indented) must be recognised the same as "**Target**"
+    const input = '  **Target**\nFirst paying customer by end of Q2.';
+    expect(markdownToTeamsHtml(input)).toBe(
+      '<p><b>Target</b></p><p>First paying customer by end of Q2.</p>',
+    );
+  });
+
   it('returns empty paragraph for empty string', () => {
     expect(markdownToTeamsHtml('')).toBe('<p></p>');
   });

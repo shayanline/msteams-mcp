@@ -72,7 +72,7 @@ function buildTableHtml(lines: string[]): string {
  * headings sit directly above their content without cramping.
  */
 function isBoldOnlyLine(raw: string): boolean {
-  const trimmed = raw.trimEnd();
+  const trimmed = raw.trim();
   return /^(\*\*[^*]+\*\*|__[^_]+__)$/.test(trimmed);
 }
 
