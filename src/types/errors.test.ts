@@ -44,6 +44,15 @@ describe('createError', () => {
     expect(error.retryable).toBe(false);
   });
 
+  it('creates non-retryable error for FORBIDDEN with permission-focused suggestions', () => {
+    const error = createError(ErrorCode.FORBIDDEN, 'Not a channel owner');
+    expect(error.retryable).toBe(false);
+    expect(error.suggestions.some(s => s.toLowerCase().includes('permission'))).toBe(true);
+    // Suggestions must explicitly steer away from re-authenticating, since it
+    // cannot fix a permissions error (unlike AUTH_REQUIRED/AUTH_EXPIRED).
+    expect(error.suggestions.some(s => s.includes('Do NOT call teams_login'))).toBe(true);
+  });
+
   it('allows overriding retryable flag', () => {
     const error = createError(ErrorCode.AUTH_REQUIRED, 'Auth needed', { retryable: true });
     expect(error.retryable).toBe(true);
@@ -69,8 +78,13 @@ describe('classifyHttpError', () => {
     expect(classifyHttpError(401)).toBe(ErrorCode.AUTH_EXPIRED);
   });
 
-  it('classifies 403 as AUTH_REQUIRED', () => {
-    expect(classifyHttpError(403)).toBe(ErrorCode.AUTH_REQUIRED);
+  it('classifies 403 as FORBIDDEN, not an auth error', () => {
+    // 403 means the user is authenticated but lacks permission for this specific
+    // action (e.g. not a channel owner, not the message author). It must not be
+    // classified as AUTH_REQUIRED/AUTH_EXPIRED, which would trigger the
+    // auto-login retry flow in server.ts for an error that re-authenticating
+    // can never fix.
+    expect(classifyHttpError(403)).toBe(ErrorCode.FORBIDDEN);
   });
 
   it('classifies 404 as NOT_FOUND', () => {
