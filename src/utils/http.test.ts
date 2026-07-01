@@ -94,7 +94,9 @@ describe('httpRequest', () => {
       })
     );
 
-    const result = await httpRequest('https://api.example.com/data');
+    // maxRetries: 1 avoids waiting out the real 5s Retry-After delay between
+    // attempts; this test only cares about the shape of the returned error.
+    const result = await httpRequest('https://api.example.com/data', { maxRetries: 1 });
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -219,8 +221,9 @@ describe('httpRequest', () => {
       })
     );
 
-    // First request triggers rate limit state
-    await httpRequest('https://api.example.com/data');
+    // First request triggers rate limit state. maxRetries: 1 avoids waiting out
+    // the real 60s Retry-After delay between attempts.
+    await httpRequest('https://api.example.com/data', { maxRetries: 1 });
 
     // Replace fetch mock for the second request to verify rate limit check
     vi.mocked(fetch).mockClear();
@@ -234,6 +237,63 @@ describe('httpRequest', () => {
     }
     // Should not have called fetch since we were rate limited
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it('scopes rate limit state to the host that returned 429, not other hosts', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response('Rate Limited', {
+        status: 429,
+        headers: { 'Retry-After': '60' },
+      })
+    );
+
+    // Trigger rate limit state for one host. maxRetries: 1 avoids waiting out
+    // the real 60s Retry-After delay between attempts.
+    await httpRequest('https://substrate.office.com/v2/query', { maxRetries: 1 });
+
+    // A different, unrelated host should not be blocked by that rate limit
+    vi.mocked(fetch).mockClear();
+    vi.mocked(fetch).mockResolvedValue(
+      new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+    );
+
+    const result = await httpRequest('https://graph.microsoft.com/v1.0/me');
+
+    expect(result.ok).toBe(true);
+    expect(vi.mocked(fetch)).toHaveBeenCalled();
+  });
+
+  it('honours Retry-After as the delay for the next attempt within the same request', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(
+          new Response('Rate Limited', { status: 429, headers: { 'Retry-After': '3' } })
+        )
+        .mockResolvedValueOnce(
+          new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+        );
+
+      const promise = httpRequest('https://api.example.com/data', { maxRetries: 2 });
+
+      // First attempt fires immediately and comes back 429.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+
+      // Before the full 3s Retry-After window elapses, the retry must not fire yet
+      // (the old exponential-backoff-only delay would have fired well before this).
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+
+      // Once the Retry-After window elapses, the retry fires.
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+
+      const result = await promise;
+      expect(result.ok).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('handles plain text response', async () => {
@@ -279,8 +339,9 @@ describe('clearRateLimitState', () => {
       })
     ));
 
-    // First request triggers rate limit
-    await httpRequest('https://api.example.com/data');
+    // First request triggers rate limit. maxRetries: 1 avoids waiting out the
+    // real 60s Retry-After delay between attempts.
+    await httpRequest('https://api.example.com/data', { maxRetries: 1 });
 
     // Clear the rate limit state
     clearRateLimitState();

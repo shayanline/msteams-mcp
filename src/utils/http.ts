@@ -30,8 +30,21 @@ export interface HttpResponse<T = unknown> {
   data: T;
 }
 
-/** Rate limit state tracking. */
-let rateLimitedUntil: number | null = null;
+/** Rate limit state tracking, keyed by hostname so one throttled API doesn't block the rest. */
+const rateLimitedUntil = new Map<string, number>();
+
+/**
+ * Returns the hostname to key rate-limit state by. Falls back to the full URL
+ * if it can't be parsed as an absolute URL, so an invalid input never crashes
+ * the request path.
+ */
+function getRateLimitKey(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
 
 /**
  * Makes an HTTP request with timeout, retry, and error handling.
@@ -48,9 +61,12 @@ export async function httpRequest<T = unknown>(
     ...fetchOptions
   } = options;
 
+  const rateLimitKey = getRateLimitKey(url);
+
   // Check rate limit state
-  if (rateLimitedUntil && Date.now() < rateLimitedUntil) {
-    const waitMs = rateLimitedUntil - Date.now();
+  const rateLimitExpiry = rateLimitedUntil.get(rateLimitKey);
+  if (rateLimitExpiry && Date.now() < rateLimitExpiry) {
+    const waitMs = rateLimitExpiry - Date.now();
     return err(createError(
       ErrorCode.RATE_LIMITED,
       `Rate limited. Retry after ${Math.ceil(waitMs / 1000)}s`,
@@ -72,7 +88,7 @@ export async function httpRequest<T = unknown>(
 
       // Handle rate limiting
       if (result.error.code === ErrorCode.RATE_LIMITED && result.error.retryAfterMs) {
-        rateLimitedUntil = Date.now() + result.error.retryAfterMs;
+        rateLimitedUntil.set(rateLimitKey, Date.now() + result.error.retryAfterMs);
       }
 
       // Don't retry non-retryable errors
@@ -85,13 +101,12 @@ export async function httpRequest<T = unknown>(
         return result;
       }
 
-      // Calculate backoff delay with jitter to avoid thundering herd
-      const baseDelay = Math.min(
-        retryBaseDelayMs * Math.pow(2, attempt - 1),
-        retryMaxDelayMs
-      );
-      const delay = baseDelay * (0.5 + Math.random() * 0.5);
-      
+      // Honour the server's Retry-After for the next attempt of this same request;
+      // otherwise fall back to exponential backoff with jitter to avoid thundering herd.
+      const delay = result.error.retryAfterMs
+        ? Math.min(result.error.retryAfterMs, retryMaxDelayMs)
+        : Math.min(retryBaseDelayMs * Math.pow(2, attempt - 1), retryMaxDelayMs) * (0.5 + Math.random() * 0.5);
+
       await sleep(delay);
       
     } catch (error) {
@@ -201,5 +216,5 @@ function sleep(ms: number): Promise<void> {
  * Clears the rate limit state (for testing).
  */
 export function clearRateLimitState(): void {
-  rateLimitedUntil = null;
+  rateLimitedUntil.clear();
 }
