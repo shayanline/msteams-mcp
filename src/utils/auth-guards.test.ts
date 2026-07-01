@@ -49,6 +49,7 @@ import {
   extractGraphToken,
   extractRegionConfig,
   getUserProfile,
+  clearTokenCache,
 } from '../auth/token-extractor.js';
 import { refreshTokensViaBrowser } from '../auth/token-refresh.js';
 
@@ -86,11 +87,12 @@ describe('handleSubstrateError', () => {
     }
   });
 
-  it('returns the error for AUTH_EXPIRED (and would clear cache)', () => {
+  it('returns the error for AUTH_EXPIRED and clears the token cache', () => {
     const result: Result<string> = err(createError(ErrorCode.AUTH_EXPIRED, 'Token expired'));
     const handled = handleSubstrateError(result);
     expect(handled.ok).toBe(false);
     if (!handled.ok) expect(handled.error.code).toBe(ErrorCode.AUTH_EXPIRED);
+    expect(clearTokenCache).toHaveBeenCalledOnce();
   });
 
   it('passes through non-AUTH_EXPIRED errors without clearing cache', () => {
@@ -98,6 +100,7 @@ describe('handleSubstrateError', () => {
     const handled = handleSubstrateError(result);
     expect(handled.ok).toBe(false);
     if (!handled.ok) expect(handled.error.code).toBe(ErrorCode.RATE_LIMITED);
+    expect(clearTokenCache).not.toHaveBeenCalled();
   });
 
   it('does not break if accidentally called on an ok result (defensive)', () => {
@@ -105,6 +108,7 @@ describe('handleSubstrateError', () => {
     const handled = handleSubstrateError(result);
     expect(handled.ok).toBe(true);
     if (handled.ok) expect(handled.value).toBe('success');
+    expect(clearTokenCache).not.toHaveBeenCalled();
   });
 });
 

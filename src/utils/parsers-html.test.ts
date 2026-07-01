@@ -86,6 +86,13 @@ describe('stripHtml', () => {
     expect(stripHtml('   spaced   ')).toBe('spaced');
   });
 
+  it('does not over-decode double-encoded entities', () => {
+    // "&amp;lt;" is a literal ampersand-escaped "&lt;" i.e. the author wants the
+    // reader to see the four characters "&lt;", not "<". Decoding &amp; before
+    // &lt; would incorrectly turn this into a real "<" via a second decode pass.
+    expect(stripHtml('&amp;lt;script&amp;gt;')).toBe('&lt;script&gt;');
+  });
+
   it('returns empty string for empty input', () => {
     expect(stripHtml('')).toBe('');
   });
