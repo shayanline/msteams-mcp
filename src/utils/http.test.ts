@@ -475,6 +475,40 @@ describe('httpRequest - additional branch coverage', () => {
     if (!result.ok) expect(result.error.code).toBe('RATE_LIMITED');
   });
 
+  it('honours a Retry-After of exactly 0 by retrying immediately, not via backoff', async () => {
+    // retryAfterMs of 0 is falsy in JS. If the delay selection used a truthiness
+    // check instead of an explicit undefined check, a 0ms Retry-After would be
+    // ignored and the retry would instead wait out the (much longer) exponential
+    // backoff delay for this attempt.
+    vi.useFakeTimers();
+    try {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(
+          new Response('Rate Limited', { status: 429, headers: { 'Retry-After': '0' } })
+        )
+        .mockResolvedValueOnce(
+          new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+        );
+
+      const promise = httpRequest('https://api.example.com/data', {
+        maxRetries: 2,
+        retryBaseDelayMs: 5000,
+      });
+
+      // Only advance a negligible amount of time. With a 0ms Retry-After, the
+      // retry must have already fired; the buggy fallback (exponential backoff
+      // starting at retryBaseDelayMs) would need at least ~2500ms (half-jitter
+      // minimum) before firing.
+      await vi.advanceTimersByTimeAsync(1);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+
+      const result = await promise;
+      expect(result.ok).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('returns an UNKNOWN error when maxRetries is 0 (loop body never runs)', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response('{}', { status: 200 }));
 

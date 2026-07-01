@@ -47,14 +47,18 @@ function getRateLimitKey(url: string): string {
 }
 
 /**
- * Returns the active rate-limit expiry for a key, if any. Deletes the entry
- * first if it has already passed, so a long-running process that talks to
- * many distinct hosts doesn't accumulate stale keys indefinitely.
+ * Returns the active rate-limit expiry for a key, if any, relative to `now`.
+ * Deletes the entry first if it has already passed, so a long-running process
+ * that talks to many distinct hosts doesn't accumulate stale keys
+ * indefinitely. Taking `now` as a parameter (rather than calling Date.now()
+ * again here) guarantees the caller's own "time remaining" calculation is
+ * against the exact same instant used to decide the entry is still active,
+ * so it can never come back zero or negative.
  */
-function getActiveRateLimitExpiry(key: string): number | undefined {
+function getActiveRateLimitExpiry(key: string, now: number): number | undefined {
   const expiry = rateLimitedUntil.get(key);
   if (expiry === undefined) return undefined;
-  if (Date.now() >= expiry) {
+  if (now >= expiry) {
     rateLimitedUntil.delete(key);
     return undefined;
   }
@@ -78,10 +82,13 @@ export async function httpRequest<T = unknown>(
 
   const rateLimitKey = getRateLimitKey(url);
 
-  // Check rate limit state
-  const rateLimitExpiry = getActiveRateLimitExpiry(rateLimitKey);
+  // Check rate limit state. waitMs is computed from the same `now` used to
+  // decide the entry is still active, so it can never come back zero/negative
+  // (which could otherwise happen if the entry expired between the two calls).
+  const now = Date.now();
+  const rateLimitExpiry = getActiveRateLimitExpiry(rateLimitKey, now);
   if (rateLimitExpiry !== undefined) {
-    const waitMs = rateLimitExpiry - Date.now();
+    const waitMs = rateLimitExpiry - now;
     return err(createError(
       ErrorCode.RATE_LIMITED,
       `Rate limited. Retry after ${Math.ceil(waitMs / 1000)}s`,
@@ -101,8 +108,9 @@ export async function httpRequest<T = unknown>(
 
       lastError = result.error;
 
-      // Handle rate limiting
-      if (result.error.code === ErrorCode.RATE_LIMITED && result.error.retryAfterMs) {
+      // Handle rate limiting. Check for undefined rather than truthiness so a
+      // valid "Retry-After: 0" is still recorded instead of being ignored.
+      if (result.error.code === ErrorCode.RATE_LIMITED && result.error.retryAfterMs !== undefined) {
         rateLimitedUntil.set(rateLimitKey, Date.now() + result.error.retryAfterMs);
       }
 
@@ -116,9 +124,11 @@ export async function httpRequest<T = unknown>(
         return result;
       }
 
-      // Honour the server's Retry-After for the next attempt of this same request;
-      // otherwise fall back to exponential backoff with jitter to avoid thundering herd.
-      const delay = result.error.retryAfterMs
+      // Honour the server's Retry-After for the next attempt of this same request
+      // (checking for undefined rather than truthiness so a valid 0ms value is
+      // still honoured instead of falling through to backoff); otherwise fall
+      // back to exponential backoff with jitter to avoid thundering herd.
+      const delay = result.error.retryAfterMs !== undefined
         ? Math.min(result.error.retryAfterMs, retryMaxDelayMs)
         : Math.min(retryBaseDelayMs * Math.pow(2, attempt - 1), retryMaxDelayMs) * (0.5 + Math.random() * 0.5);
 
