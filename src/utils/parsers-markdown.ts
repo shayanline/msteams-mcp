@@ -65,11 +65,31 @@ function buildTableHtml(lines: string[]): string {
 }
 
 /**
+ * Returns true when a raw markdown line (before HTML conversion) consists
+ * solely of a bold or italic span — e.g. "**Target**" or "__Label__" — with
+ * optional trailing whitespace / hard-break markers ("  "). These label lines
+ * should be flushed as their own <p> rather than joined to the next line with
+ * a <br>, so headings sit directly above their content without cramping.
+ */
+function isBoldOnlyLine(raw: string): boolean {
+  const trimmed = raw.trimEnd();
+  return /^(\*\*[^*]+\*\*|__[^_]+__)$/.test(trimmed);
+}
+
+/**
  * Renders the lines of a single block (text already split on blank lines) into
  * Teams HTML. Walks the lines and groups consecutive runs by type, so block
  * elements (lists, blockquotes, tables, headings) can interrupt a paragraph
  * without a separating blank line, matching standard markdown behaviour. Plain
  * lines accumulate into a paragraph and are joined with <br>.
+ *
+ * Trailing two-space hard-break markers ("  ") are stripped from each line
+ * before rendering — they are a Teams/LLM workaround that is no longer needed
+ * now that bold-only lines are treated as their own block.
+ *
+ * A line that contains only a bold (or italic) span — e.g. "**Target**" — is
+ * flushed as its own <p> so the next line starts a fresh paragraph, preventing
+ * the heading and its content from being crammed together with a <br>.
  */
 function renderTextBlock(lines: string[]): string {
   const out: string[] = [];
@@ -83,7 +103,8 @@ function renderTextBlock(lines: string[]): string {
 
   let i = 0;
   while (i < lines.length) {
-    const line = lines[i];
+    // Strip trailing hard-break markers ("  ") before any processing.
+    const line = lines[i].replace(/  +$/, '');
 
     // Heading: its own single-line block
     const heading = line.match(/^\s*(#{1,6})\s+(.*)$/);
@@ -140,6 +161,15 @@ function renderTextBlock(lines: string[]): string {
         i++;
       }
       out.push(`<blockquote>${inner.join('<br>')}</blockquote>`);
+      continue;
+    }
+
+    // Bold-only label line (e.g. "**Target**"): flush as its own <p> so the
+    // next line starts a fresh paragraph rather than being joined with <br>.
+    if (isBoldOnlyLine(lines[i])) {
+      flushParagraph();
+      out.push(`<p>${convertInlineFormatting(line)}</p>`);
+      i++;
       continue;
     }
 
