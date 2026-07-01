@@ -69,7 +69,9 @@ describe('httpRequest', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.code).toBe('AUTH_REQUIRED');
+      // 403 is a permissions error, not an auth error; must not be AUTH_REQUIRED
+      // or AUTH_EXPIRED, which would trigger server.ts's auto-login retry flow.
+      expect(result.error.code).toBe('FORBIDDEN');
     }
   });
 

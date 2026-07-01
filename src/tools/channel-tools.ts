@@ -85,7 +85,6 @@ async function handleCreateChannel(
 ): Promise<ToolResult> {
   const result = await createChannel(input.teamId, input.displayName, input.description, input.membershipType);
   return handleApiResult(result, (value) => ({
-    success: true,
     ...value,
     message: `Channel "${value.displayName}" created.`,
   }));
@@ -97,7 +96,6 @@ async function handleDeleteChannel(
 ): Promise<ToolResult> {
   const result = await deleteChannel(input.teamId, input.channelId);
   return handleApiResult(result, (value) => ({
-    success: true,
     ...value,
     message: 'Channel deleted.',
   }));

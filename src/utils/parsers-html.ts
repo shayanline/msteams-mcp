@@ -48,15 +48,18 @@ export function extractLinks(html: string): ExtractedLink[] {
  * Strips HTML tags from content for display.
  */
 export function stripHtml(html: string): string {
+  // &amp; is decoded last so double-encoded content (e.g. a literal "&amp;lt;"
+  // meaning the four characters "&lt;") isn't over-decoded by the earlier
+  // passes turning an already-escaped ampersand into a real "<".
   return html
     .replace(/<[^>]*>/g, ' ')
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&')
     .replace(/\s+/g, ' ')
     .trim();
 }

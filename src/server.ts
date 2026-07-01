@@ -158,11 +158,21 @@ export class TeamsServer implements ITeamsServer {
 
     this.browserManager = await createBrowserContext({ headless });
 
-    await ensureAuthenticated(
-      this.browserManager.page,
-      this.browserManager.context,
-      (msg) => log.info('auth', msg)
-    );
+    try {
+      await ensureAuthenticated(
+        this.browserManager.page,
+        this.browserManager.context,
+        (msg) => log.info('auth', msg)
+      );
+    } catch (error) {
+      try {
+        await closeBrowser(this.browserManager, false);
+      } catch {
+        // Ignore cleanup errors
+      }
+      this.resetBrowserState();
+      throw error;
+    }
 
     this.isInitialised = true;
     return this.browserManager;
