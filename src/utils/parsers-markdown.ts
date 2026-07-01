@@ -67,9 +67,10 @@ function buildTableHtml(lines: string[]): string {
 /**
  * Returns true when a raw markdown line (before HTML conversion) consists
  * solely of a bold span — e.g. "**Target**" or "__Label__" — with optional
- * trailing whitespace / hard-break markers ("  "). These label lines should be
- * flushed as their own <p> rather than joined to the next line with a <br>, so
- * headings sit directly above their content without cramping.
+ * leading whitespace (e.g. an indented label) and trailing whitespace / hard-break
+ * markers ("  "). These label lines should be flushed as their own <p> rather
+ * than joined to the next line with a <br>, so headings sit directly above
+ * their content without cramping.
  */
 function isBoldOnlyLine(raw: string): boolean {
   const trimmed = raw.trim();

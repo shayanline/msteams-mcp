@@ -935,10 +935,13 @@ describe('markdownToTeamsHtml', () => {
   });
 
   it('detects a bold-only label with leading whitespace as its own block', () => {
-    // "  **Target**" (indented) must be recognised the same as "**Target**"
-    const input = '  **Target**\nFirst paying customer by end of Q2.';
+    // markdownToTeamsHtml() trims the whole paragraph before splitting into lines,
+    // so an indented bold label as the *first* line never keeps its leading
+    // whitespace. Put a line before it so the indent survives into renderTextBlock
+    // and actually exercises the leading-whitespace branch of isBoldOnlyLine().
+    const input = 'Some context.\n  **Target**\nFirst paying customer by end of Q2.';
     expect(markdownToTeamsHtml(input)).toBe(
-      '<p><b>Target</b></p><p>First paying customer by end of Q2.</p>',
+      '<p>Some context.</p><p>  <b>Target</b></p><p>First paying customer by end of Q2.</p>',
     );
   });
 
