@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- Login / token extraction against MSAL Browser v4 encrypted `localStorage` cache: decrypt entries using the `msal.cache.encryption` session cookie (AES-GCM + HKDF), matching `@azure/msal-browser`. Without this, Substrate search and HTTP token refresh could fail after a successful login while messaging cookies still worked.
+
 ## [0.29.2] - 2026-07-01
 
 ### Fixed

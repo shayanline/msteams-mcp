@@ -135,6 +135,17 @@ describe('extractSubstrateToken', () => {
     expect(result?.expiry).toBeInstanceOf(Date);
   });
 
+  it('extracts SubstrateSearch tokens from outlook.office.com search scopes', () => {
+    const token = makeJwt({ exp: futureExp(), oid: 'user-oid' });
+    const state = sessionWith([
+      entry('k', {
+        target: 'https://outlook.office.com/search/SubstrateSearch-Internal.ReadWrite https://outlook.office.com/search/.default',
+        secret: token,
+      }),
+    ]);
+    expect(extractSubstrateToken(state)?.token).toBe(token);
+  });
+
   it('picks the token with the longest remaining validity', () => {
     const soon = makeJwt({ exp: futureExp(HOUR) });
     const later = makeJwt({ exp: futureExp(HOUR * 5) });
