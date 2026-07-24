@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- Markdown to Teams HTML: a blank line between paragraphs now renders as a visible gap. Teams' `RichText/Html` chat renderer collapses the margin between adjacent `<p>` elements, so paragraph-to-paragraph breaks are now emitted as `<br><br>` inside a single `<p>`. Genuine block elements (lists, tables, headings, code, blockquotes) keep their own boundaries, and a heading sitting directly above its content stays tight.
 - Login / token extraction against MSAL Browser v4 encrypted `localStorage` cache: decrypt entries using the `msal.cache.encryption` session cookie (AES-GCM + HKDF), matching `@azure/msal-browser`. Without this, Substrate search and HTTP token refresh could fail after a successful login while messaging cookies still worked.
 
 ## [0.29.2] - 2026-07-01
