@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ok } from '../types/result.js';
+import { ok, err } from '../types/result.js';
+import { ErrorCode, createError } from '../types/errors.js';
 
 vi.mock('../utils/http.js', () => ({ httpRequest: vi.fn() }));
 vi.mock('../utils/auth-guards.js', () => ({ requireGraphAuth: vi.fn() }));
@@ -25,6 +26,7 @@ const shareInfoResponse = (webUrl: string) => httpOk({
   sharepointIds: { listItemUniqueId: 'LIU-GUID', siteId: 'SITE-GUID' },
 });
 const httpOk = (data: unknown) => ok({ status: 200, headers: new Headers(), data } as never);
+const httpErr = (message: string) => err(createError(ErrorCode.UNKNOWN, message)) as never;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -72,6 +74,47 @@ describe('uploadFile', () => {
     const res = await uploadFile('/tmp/missing.txt');
     expect(res.ok).toBe(false);
     expect(mockHttp).not.toHaveBeenCalled();
+  });
+
+  it('retries under a de-duplicated name when the target is locked (HTTP 423)', async () => {
+    mockRead.mockResolvedValueOnce(Buffer.from('hello'));
+    mockHttp
+      .mockResolvedValueOnce(httpErr('HTTP 423: {"error":{"code":"resourceLocked"}}')) // original locked
+      .mockResolvedValueOnce(httpOk({ id: '01Y', name: 'note (2).txt' }));              // retry succeeds
+    const res = await uploadFile('/tmp/note.txt', 'MyFolder');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value).toMatchObject({ id: '01Y', name: 'note (2).txt' });
+    expect(mockHttp).toHaveBeenCalledTimes(2);
+    expect(mockHttp.mock.calls[0][0]).toContain('/MyFolder/note.txt:/content');
+    expect(mockHttp.mock.calls[1][0]).toContain('/MyFolder/note%20(2).txt:/content');
+  });
+
+  it('returns a retryable, well-signposted error when every name variant is locked', async () => {
+    mockRead.mockResolvedValueOnce(Buffer.from('hello'));
+    mockHttp.mockResolvedValue(httpErr('HTTP 423: resourceLocked'));
+    const res = await uploadFile('/tmp/note.txt', 'MyFolder');
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(mockHttp).toHaveBeenCalledTimes(4); // original + 3 fallbacks
+    expect(res.error.retryable).toBe(true);
+    expect(res.error.suggestions.join(' ').toLowerCase()).toContain('lock');
+  });
+
+  it('surfaces a non-lock upload failure immediately without renaming', async () => {
+    mockRead.mockResolvedValueOnce(Buffer.from('hello'));
+    mockHttp.mockResolvedValueOnce(httpErr('HTTP 403: Forbidden'));
+    const res = await uploadFile('/tmp/note.txt', 'MyFolder');
+    expect(res.ok).toBe(false);
+    expect(mockHttp).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not treat a non-423 error that merely mentions a lock as retryable', async () => {
+    mockRead.mockResolvedValueOnce(Buffer.from('hello'));
+    mockHttp.mockResolvedValueOnce(httpErr('HTTP 403: your account is locked'));
+    const res = await uploadFile('/tmp/note.txt', 'MyFolder');
+    expect(res.ok).toBe(false);
+    expect(mockHttp).toHaveBeenCalledTimes(1); // surfaced immediately, no rename retries
   });
 });
 
@@ -204,6 +247,33 @@ describe('sendFileToChat (channel conversations)', () => {
     expect(conv).toBe('19:abc@thread.tacv2');
     expect(content).toBe('cap');
     expect(options.files![0].objectUrl).toContain('/teams/X/');
+  });
+
+  it('retries the channel upload under a de-duplicated name when the target is locked (HTTP 423)', async () => {
+    mockChannelInfo.mockResolvedValueOnce(ok({ groupId: 'GID', sharepointSiteUrl: 'https://t.sharepoint.com/teams/X' }) as never);
+    mockRead.mockResolvedValueOnce(Buffer.from('hi'));
+    mockHttp
+      .mockResolvedValueOnce(httpOk({ id: 'folder', parentReference: { driveId: 'drv' } }))          // getChannelFilesFolder
+      .mockResolvedValueOnce(httpErr('HTTP 423: {"error":{"code":"resourceLocked"}}'))               // upload PUT (locked)
+      .mockResolvedValueOnce(httpOk({ id: 'item1', name: 'report (2).pdf', webUrl: 'x' }))            // retry PUT succeeds
+      .mockResolvedValueOnce(httpOk({                                                                 // getShareFileInfo (reflects the renamed file)
+        id: 'item1', name: 'report (2).pdf',
+        webUrl: 'https://t.sharepoint.com/teams/X/Shared%20Documents/Chan/report%20(2).pdf',
+        sharepointIds: { listItemUniqueId: 'LIU-GUID', siteId: 'SITE-GUID' },
+      }));
+    mockSend.mockResolvedValueOnce(ok({ messageId: 'm', timestamp: 1 }) as never);
+
+    const res = await sendFileToChat('19:abc@thread.tacv2', '/tmp/report.pdf', 'cap');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // folder lookup + locked PUT + retry PUT + share-info = 4 calls.
+    expect(mockHttp).toHaveBeenCalledTimes(4);
+    expect(mockHttp.mock.calls[1][0]).toContain('/drives/drv/items/folder:/report.pdf:/content');
+    expect(mockHttp.mock.calls[2][0]).toContain('/drives/drv/items/folder:/report%20(2).pdf:/content');
+    // The de-duplicated name propagates to the returned result and the chiclet.
+    expect(res.value.fileName).toBe('report (2).pdf');
+    const [, , options] = mockSend.mock.calls[0] as [string, string, { files?: Record<string, unknown>[] }];
+    expect(options.files![0]).toMatchObject({ title: 'report (2).pdf', fileName: 'report (2).pdf' });
   });
 
   it('returns the channel-info error when the team cannot be resolved', async () => {
