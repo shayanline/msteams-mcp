@@ -189,6 +189,36 @@ function renderTextBlock(rawLines: string[]): string {
 }
 
 /**
+ * Joins rendered top-level blocks into the final HTML.
+ *
+ * A blank line in the source (`\n\n`) is an intentional paragraph break. Teams'
+ * `RichText/Html` chat renderer collapses the margin between adjacent `<p>`
+ * elements, so `<p>A</p><p>B</p>` arrives with no visible gap (cramped). A
+ * `<br><br>` inside a single `<p>`, on the other hand, DOES render a blank line.
+ *
+ * So when one block ends a paragraph (`</p>`) and the next begins one (`<p>`),
+ * which only happens across a blank-line boundary (a single source block is
+ * rendered as one entry), we merge them into one `<p>` separated by `<br><br>`
+ * to produce the visible gap the author intended. Genuine block elements (lists,
+ * tables, headings, code, blockquotes) keep their own boundaries untouched, and
+ * a heading directly above its content (no blank line) stays tight because that
+ * happens inside a single rendered block, not at a join seam.
+ */
+function joinBlocksWithParagraphGaps(parts: string[]): string {
+  let html = '';
+  for (const part of parts) {
+    if (!part) continue;
+    if (html.endsWith('</p>') && part.startsWith('<p>')) {
+      // Drop the seam "</p><p>" and stitch the paragraphs together with a gap.
+      html = `${html.slice(0, -4)}<br><br>${part.slice(3)}`;
+    } else {
+      html += part;
+    }
+  }
+  return html;
+}
+
+/**
  * Converts markdown-formatted text to Teams-compatible HTML.
  * 
  * Supports:
@@ -197,7 +227,7 @@ function renderTextBlock(rawLines: string[]): string {
  * - ~~strikethrough~~ → <s>
  * - `inline code` → <code>
  * - ```code blocks``` → <pre><code>
- * - Newlines → paragraph breaks
+ * - Blank line (\n\n) → visible paragraph gap; single newline (\n) → line break
  * - Ordered lists (1. item) → <ol><li>
  * - Unordered lists (- item, * item) → <ul><li>
  * - Headings (#..###### ) → <h1>..<h6>
@@ -248,7 +278,7 @@ export function markdownToTeamsHtml(text: string): string {
     }
   }
   
-  return htmlParts.join('') || '<p></p>';
+  return joinBlocksWithParagraphGaps(htmlParts) || '<p></p>';
 }
 
 /**
