@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- `teams_send_file` / `teams_send_files`: when the target file name is briefly locked in OneDrive (HTTP 423, for example a same-named file was just deleted or is still syncing), the upload now retries automatically under a de-duplicated name (`report (2).xlsx`, up to three variants) instead of failing the send. Failures other than a lock are surfaced immediately, and if every variant is locked the error is retryable and explains how to recover. Read the final name from the returned item.
+
 ### Fixed
 - Login / token extraction against MSAL Browser v4 encrypted `localStorage` cache: decrypt entries using the `msal.cache.encryption` session cookie (AES-GCM + HKDF), matching `@azure/msal-browser`. Without this, Substrate search and HTTP token refresh could fail after a successful login while messaging cookies still worked.
 

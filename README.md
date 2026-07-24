@@ -182,6 +182,8 @@ The server uses your system's Chrome (macOS/Linux) or Edge (Windows) for authent
 
 `teams_send_files` does the same but attaches **multiple files to one message**, so you get a single post carrying several file chiclets rather than one message per file. Pass `localPaths` (an array) and an optional `caption`.
 
+If the target file name is briefly locked in OneDrive (for example a same-named file was just deleted or is still syncing), the upload is retried automatically under a de-duplicated name like `report (2).xlsx`, so read the final name from the returned item rather than assuming the original.
+
 ### Tasks (Microsoft To Do)
 
 | Tool | Description |
