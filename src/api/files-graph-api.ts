@@ -83,6 +83,49 @@ export async function listDriveFiles(folderPath?: string): Promise<Result<{ item
   return ok({ items: (response.value.data.value ?? []).map(parseItem) });
 }
 
+/**
+ * PUTs file content to a Graph upload URL, retrying under de-duplicated names
+ * when the target item is locked (HTTP 423 resourceLocked, which happens when a
+ * same-named file was just deleted or is still syncing). `buildUrl` maps a
+ * candidate file name to its upload URL, so this works for both OneDrive and a
+ * channel's SharePoint library. Failures other than a lock are surfaced
+ * immediately. Callers read the final name from the returned item.
+ */
+async function putContentWithLockRetry(
+  token: string,
+  data: Buffer,
+  originalName: string,
+  buildUrl: (name: string) => string,
+): Promise<Result<DriveItem>> {
+  const candidates = [originalName, ...dedupeNames(originalName, UPLOAD_LOCK_RETRIES)];
+  const headers = { ...bearer(token), 'Content-Type': 'application/octet-stream' };
+
+  let lastError: McpError | undefined;
+  for (const name of candidates) {
+    const response = await httpRequest<Record<string, unknown>>(
+      buildUrl(name),
+      { method: 'PUT', headers, body: new Uint8Array(data) }
+    );
+    if (response.ok) return ok(parseItem(response.value.data));
+    // A failure other than a lock (auth, size, network, ...) will not be fixed by
+    // renaming, so surface it immediately rather than burning through variants.
+    if (!isResourceLocked(response.error)) return response;
+    lastError = response.error;
+  }
+
+  return err(createError(
+    ErrorCode.UNKNOWN,
+    `Upload failed: "${originalName}" and ${UPLOAD_LOCK_RETRIES} fallback name(s) are all locked (HTTP 423). ${lastError?.message ?? ''}`.trim(),
+    {
+      retryable: true,
+      suggestions: [
+        'Wait about a minute for the storage lock to release, then retry.',
+        'Or send the file under a different name.',
+      ],
+    }
+  ));
+}
+
 /** Uploads a local file to OneDrive under the given folder. Returns the drive item. */
 export async function uploadFile(localPath: string, folder = 'Apps/AutomationUploads'): Promise<Result<DriveItem>> {
   const auth = requireGraphAuth();
@@ -98,38 +141,9 @@ export async function uploadFile(localPath: string, folder = 'Apps/AutomationUpl
     return err(createError(ErrorCode.INVALID_INPUT, 'File exceeds the 250 MB upload limit.'));
   }
 
-  // Upload under the original name. If OneDrive reports the target item is locked
-  // (HTTP 423 resourceLocked, which happens when a same-named file was just deleted
-  // or is still syncing), retry under a de-duplicated name so the send still succeeds
-  // instead of hard-failing. Callers read the final name from the returned item.
-  const original = basename(localPath);
-  const candidates = [original, ...dedupeNames(original, UPLOAD_LOCK_RETRIES)];
-
-  let lastError: McpError | undefined;
-  for (const name of candidates) {
-    const drivePath = `${folder}/${name}`.split('/').map(encodeURIComponent).join('/');
-    const response = await httpRequest<Record<string, unknown>>(
-      `${GRAPH_BASE_URL}/me/drive/root:/${drivePath}:/content`,
-      { method: 'PUT', headers: { ...bearer(auth.value), 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(data) }
-    );
-    if (response.ok) return ok(parseItem(response.value.data));
-    // A failure other than a lock (auth, size, network, ...) will not be fixed by
-    // renaming, so surface it immediately rather than burning through variants.
-    if (!isResourceLocked(response.error)) return response;
-    lastError = response.error;
-  }
-
-  return err(createError(
-    ErrorCode.UNKNOWN,
-    `OneDrive upload failed: "${original}" and ${UPLOAD_LOCK_RETRIES} fallback name(s) are all locked (HTTP 423). ${lastError?.message ?? ''}`.trim(),
-    {
-      retryable: true,
-      suggestions: [
-        'Wait about a minute for OneDrive to release the lock, then retry.',
-        'Or send the file under a different name.',
-      ],
-    }
-  ));
+  return putContentWithLockRetry(auth.value, data, basename(localPath), (name) =>
+    `${GRAPH_BASE_URL}/me/drive/root:/${`${folder}/${name}`.split('/').map(encodeURIComponent).join('/')}:/content`
+  );
 }
 
 /** Downloads a OneDrive file (by item id) to a local path. */
@@ -320,13 +334,9 @@ async function uploadFileToDriveFolder(
     return err(createError(ErrorCode.INVALID_INPUT, 'File exceeds the 250 MB upload limit.'));
   }
 
-  const name = basename(localPath);
-  const response = await httpRequest<Record<string, unknown>>(
-    `${GRAPH_BASE_URL}/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(folderId)}:/${encodeURIComponent(name)}:/content`,
-    { method: 'PUT', headers: { ...bearer(auth.value), 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(data) }
+  return putContentWithLockRetry(auth.value, data, basename(localPath), (name) =>
+    `${GRAPH_BASE_URL}/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(folderId)}:/${encodeURIComponent(name)}:/content`
   );
-  if (!response.ok) return response;
-  return ok(parseItem(response.value.data));
 }
 
 /**

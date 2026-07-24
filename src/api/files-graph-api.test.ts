@@ -249,6 +249,24 @@ describe('sendFileToChat (channel conversations)', () => {
     expect(options.files![0].objectUrl).toContain('/teams/X/');
   });
 
+  it('retries the channel upload under a de-duplicated name when the target is locked (HTTP 423)', async () => {
+    mockChannelInfo.mockResolvedValueOnce(ok({ groupId: 'GID', sharepointSiteUrl: 'https://t.sharepoint.com/teams/X' }) as never);
+    mockRead.mockResolvedValueOnce(Buffer.from('hi'));
+    mockHttp
+      .mockResolvedValueOnce(httpOk({ id: 'folder', parentReference: { driveId: 'drv' } }))          // getChannelFilesFolder
+      .mockResolvedValueOnce(httpErr('HTTP 423: {"error":{"code":"resourceLocked"}}'))               // upload PUT (locked)
+      .mockResolvedValueOnce(httpOk({ id: 'item1', name: 'report (2).pdf', webUrl: 'x' }))            // retry PUT succeeds
+      .mockResolvedValueOnce(shareInfoResponse('https://t.sharepoint.com/teams/X/Shared%20Documents/Chan/report.pdf')); // getShareFileInfo
+    mockSend.mockResolvedValueOnce(ok({ messageId: 'm', timestamp: 1 }) as never);
+
+    const res = await sendFileToChat('19:abc@thread.tacv2', '/tmp/report.pdf', 'cap');
+    expect(res.ok).toBe(true);
+    // folder lookup + locked PUT + retry PUT + share-info = 4 calls.
+    expect(mockHttp).toHaveBeenCalledTimes(4);
+    expect(mockHttp.mock.calls[1][0]).toContain('/drives/drv/items/folder:/report.pdf:/content');
+    expect(mockHttp.mock.calls[2][0]).toContain('/drives/drv/items/folder:/report%20(2).pdf:/content');
+  });
+
   it('returns the channel-info error when the team cannot be resolved', async () => {
     mockChannelInfo.mockResolvedValueOnce({ ok: false, error: { code: 'API_ERROR' } } as never);
     const res = await sendFileToChat('19:abc@thread.tacv2', '/tmp/report.pdf');
