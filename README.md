@@ -31,11 +31,26 @@ This server calls Microsoft's Teams APIs directly (Substrate, chatsvc, CSA)  - t
 
 ### Configure Your MCP Client
 
-Add to your MCP client configuration (e.g., Claude Desktop, Windsurf, Cursor):
+The top-level key depends on your client. Most clients (Claude Desktop, Cursor, Windsurf) use `mcpServers`, while VS Code's `.vscode/mcp.json` uses `servers`. Copy the matching block below.
+
+**Claude Desktop, Cursor, Windsurf** (`mcpServers`):
 
 ```json
 {
   "mcpServers": {
+    "teams": {
+      "command": "npx",
+      "args": ["-y", "@shayanline/msteams-mcp@latest"]
+    }
+  }
+}
+```
+
+**VS Code** (`.vscode/mcp.json`, uses `servers`):
+
+```json
+{
+  "servers": {
     "teams": {
       "command": "npx",
       "args": ["-y", "@shayanline/msteams-mcp@latest"]
@@ -68,6 +83,8 @@ Then configure your MCP client:
   }
 }
 ```
+
+For VS Code, use the `servers` key in `.vscode/mcp.json` instead of `mcpServers` (same `command` and `args`).
 
 The server uses your system's Chrome (macOS/Linux) or Edge (Windows) for authentication.
 
