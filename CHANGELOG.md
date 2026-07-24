@@ -6,8 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-07-24
+
 ### Added
 - `teams_send_file` / `teams_send_files`: when the target file name is briefly locked (HTTP 423, for example a same-named file was just deleted or is still syncing, in either OneDrive for chats or a channel's SharePoint library), the upload now retries automatically under a de-duplicated name (`report (2).xlsx`, up to three variants) instead of failing the send. Failures other than a lock are surfaced immediately, and if every variant is locked the error is retryable and explains how to recover. Read the final name from the returned item.
+
+### Changed
+- README: documented the VS Code `.vscode/mcp.json` configuration (which uses a `servers` key) alongside the existing `mcpServers` example.
 
 ### Fixed
 - Markdown to Teams HTML: a blank line between paragraphs now renders as a visible gap. Teams' `RichText/Html` chat renderer collapses the margin between adjacent `<p>` elements, so paragraph-to-paragraph breaks are now emitted as `<br><br>` inside a single `<p>`. Genuine block elements (lists, tables, headings, code, blockquotes) keep their own boundaries, and a heading sitting directly above its content stays tight.
@@ -83,7 +88,8 @@ All notable changes to this project are documented here. The format is based on
 
 See the [GitHub releases](https://github.com/shayanline/msteams-mcp/releases) for the history before independent maintenance began.
 
-[Unreleased]: https://github.com/shayanline/msteams-mcp/compare/v0.29.2...HEAD
+[Unreleased]: https://github.com/shayanline/msteams-mcp/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/shayanline/msteams-mcp/compare/v0.29.2...v0.30.0
 [0.29.2]: https://github.com/shayanline/msteams-mcp/compare/v0.29.1...v0.29.2
 [0.29.1]: https://github.com/shayanline/msteams-mcp/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/shayanline/msteams-mcp/compare/v0.28.0...v0.29.0
