@@ -15,6 +15,7 @@ import {
   type SessionState,
   type TokenCache,
 } from './session-store.js';
+import { resolveMsalLocalStorage } from './msal-decrypt.js';
 import { parseJwtProfile, type UserProfile } from '../utils/parsers.js';
 import { MRI_TYPE_PREFIX, ORGID_PREFIX, MRI_ORGID_PREFIX, MAX_DEBUG_CONFIG_VALUE_LENGTH } from '../constants.js';
 
@@ -87,7 +88,10 @@ function getTeamsLocalStorage(state?: SessionState): LocalStorageEntry[] | null 
   if (!sessionState) return null;
 
   const teamsOrigin = getTeamsOrigin(sessionState);
-  return teamsOrigin?.localStorage ?? null;
+  if (!teamsOrigin?.localStorage) return null;
+
+  // MSAL browser v4 encrypts token entries; decrypt using msal.cache.encryption cookie
+  return resolveMsalLocalStorage(teamsOrigin.localStorage, sessionState.cookies);
 }
 
 /**
@@ -144,12 +148,10 @@ export function extractSubstrateToken(state?: SessionState): SubstrateTokenInfo 
       try {
         const entry = JSON.parse(item.value);
         
-        // Look for Substrate search tokens by target scope
-        // Match both old format (substrate.office.com/search/SubstrateSearch)
-        // and new format (substrate.office.com/SubstrateSearch-Internal.ReadWrite)
+        // Look for Substrate search tokens by target scope (case-insensitive).
+        // Hosts vary: substrate.office.com (classic) or outlook.office.com/search (some tenants).
         const target = entry.target as string | undefined;
-        if (!target?.includes('substrate.office.com')) continue;
-        if (!target.includes('SubstrateSearch')) continue;
+        if (!target?.toLowerCase().includes('substratesearch')) continue;
 
         if (!isJwtToken(entry.secret)) continue;
 
@@ -693,7 +695,8 @@ export function extractCsaToken(state?: SessionState): string | null {
   if (!sessionState) return null;
 
   for (const origin of sessionState.origins ?? []) {
-    for (const item of origin.localStorage ?? []) {
+    const localStorage = resolveMsalLocalStorage(origin.localStorage ?? [], sessionState.cookies);
+    for (const item of localStorage) {
       // Skip temporary entries, look for chatsvcagg tokens
       if (item.name.startsWith('tmp.')) continue;
       if (!item.name.includes('chatsvcagg.teams.microsoft.com')) continue;

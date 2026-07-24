@@ -149,6 +149,12 @@ export const MAX_FILES_PAGE_SIZE = 100;
 /** Threshold for proactive token refresh (10 minutes before expiry). */
 export const TOKEN_REFRESH_THRESHOLD_MS = 10 * 60 * 1000;
 
+/**
+ * Microsoft's first-party Teams web client ID (public SPA).
+ * Used for OAuth refresh and MSAL v4 localStorage decryption context.
+ */
+export const TEAMS_CLIENT_ID = '5e3ce6c0-2b1f-4285-8d4b-75ee78787346';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // User Identity
 // ─────────────────────────────────────────────────────────────────────────────
