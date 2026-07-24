@@ -411,63 +411,17 @@ const TOKEN_REFRESH_WAIT_TIMEOUT_MS = 20000;
 const TOKEN_REFRESH_POLL_INTERVAL_MS = 1000;
 
 /**
- * Checks in-browser localStorage for a valid Substrate token.
- * 
- * Evaluates directly in the page context to avoid serialising the full
- * session state (~600KB) to disk on every poll. Returns the token expiry
- * in minutes, or -1 if no valid token found.
- */
-async function checkBrowserTokenExpiry(page: Page): Promise<number> {
-  try {
-    return await page.evaluate(() => {
-      const now = Date.now();
-      let bestExpiry = -1;
-
-      for (let i = 0; i < localStorage.length; i++) {
-        const value = localStorage.getItem(localStorage.key(i)!);
-        if (!value) continue;
-
-        try {
-          const entry = JSON.parse(value);
-          const target = entry.target as string | undefined;
-          if (!target?.includes('substrate.office.com')) continue;
-          if (!target.includes('SubstrateSearch')) continue;
-
-          const secret = entry.secret as string | undefined;
-          if (!secret?.startsWith('ey')) continue;
-
-          // Decode JWT exp claim
-          const b64 = secret.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-          const payload = JSON.parse(atob(b64));
-          if (typeof payload.exp !== 'number') continue;
-
-          const expiryMs = payload.exp * 1000;
-          if (expiryMs <= now) continue;
-
-          const minsRemaining = Math.round((expiryMs - now) / 60000);
-          if (minsRemaining > bestExpiry) {
-            bestExpiry = minsRemaining;
-          }
-        } catch {
-          continue;
-        }
-      }
-
-      return bestExpiry;
-    });
-  } catch {
-    return -1;
-  }
-}
-
-/**
  * Waits for MSAL to refresh tokens in the browser.
- * 
+ *
  * When the browser is "authenticated" (session cookies valid) but MSAL tokens
- * are expired, we need to wait for Teams JS to load and trigger silent token
- * acquisition. Polls in-browser localStorage directly to avoid unnecessary
- * disk I/O, then saves session state once when tokens appear.
- * 
+ * are expired/encrypted, we wait for Teams JS to acquire tokens, then extract
+ * via the same decrypting path used by API tools. (In-page localStorage values
+ * are MSAL-v4 encrypted, so plaintext scans fail.)
+ *
+ * Polling reads the context storage state in memory. We only persist to disk
+ * once a valid token appears, to avoid writing and encrypting session state on
+ * every poll iteration.
+ *
  * @returns true if tokens were refreshed, false if timeout
  */
 async function waitForTokenRefresh(
@@ -476,25 +430,23 @@ async function waitForTokenRefresh(
   onProgress?: (message: string) => void,
 ): Promise<boolean> {
   const log = onProgress ?? ((msg: string) => logger.debug('auth', msg));
-  
+
   log('Waiting for MSAL to refresh tokens...');
   const startTime = Date.now();
-  
+
   while (Date.now() - startTime < TOKEN_REFRESH_WAIT_TIMEOUT_MS) {
-    // Check localStorage directly in the browser (no disk I/O)
-    const minsRemaining = await checkBrowserTokenExpiry(page);
-    
-    if (minsRemaining > 0) {
-      // Token found - save session state once
+    const state = await context.storageState();
+    const token = extractSubstrateToken(state);
+    if (token && token.expiry.getTime() > Date.now()) {
       await saveSessionState(context);
+      const minsRemaining = Math.round((token.expiry.getTime() - Date.now()) / 60000);
       log(`Token refresh detected (${minsRemaining} mins valid).`);
       return true;
     }
-    
-    // Wait and retry
+
     await page.waitForTimeout(TOKEN_REFRESH_POLL_INTERVAL_MS);
   }
-  
+
   log('Token refresh timed out.');
   return false;
 }
@@ -537,23 +489,20 @@ export async function ensureAuthenticated(
       return;
     }
     
-    // Tokens are expired - in headless mode, wait for MSAL to refresh them
-    // Teams JS will silently acquire new tokens using the session cookies
+    // Tokens missing/expired — wait for MSAL (encrypted cache needs save+decrypt).
+    // Teams JS silently acquires tokens from session cookies when possible.
+    log('Tokens not yet extractable, waiting for MSAL...');
+    const refreshed = await waitForTokenRefresh(page, context, onProgress);
+    if (refreshed) {
+      return;
+    }
+
     if (headless) {
-      log('Tokens expired, waiting for MSAL to refresh...');
-      const refreshed = await waitForTokenRefresh(page, context, onProgress);
-      
-      if (refreshed) {
-        return;
-      }
-      
-      // Still no valid tokens after waiting
       throw new Error('Headless SSO failed: MSAL token refresh timed out');
     }
-    
-    // In visible mode, the tokens might refresh while user interacts, or they can
-    // manually complete any prompts. We've saved what we have.
-    log('Session state saved (tokens may need refresh).');
+
+    // Visible mode: allow login to continue; caller may still have skype cookies
+    log('Session state saved (Substrate tokens still not extractable).');
     return;
   }
 

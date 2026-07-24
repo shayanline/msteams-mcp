@@ -27,6 +27,7 @@ import {
   getTeamsOrigin,
   type SessionState,
 } from './session-store.js';
+import { resolveMsalLocalStorage } from './msal-decrypt.js';
 import { clearTokenCache } from './token-extractor.js';
 import { ErrorCode, createError } from '../types/errors.js';
 import { type Result, ok, err } from '../types/result.js';
@@ -608,6 +609,16 @@ export async function refreshTokensViaHttp(): Promise<Result<HttpRefreshResult>>
       'No session state found. Browser login is required for first authentication.',
       { suggestions: ['Call teams_login to authenticate via browser'] }
     ));
+  }
+
+  // Decrypt MSAL v4 encrypted localStorage in-place so refresh-token extraction
+  // and subsequent cache updates see plaintext {credentialType, secret, ...}.
+  const teamsOriginForDecrypt = getTeamsOrigin(state);
+  if (teamsOriginForDecrypt?.localStorage) {
+    teamsOriginForDecrypt.localStorage = resolveMsalLocalStorage(
+      teamsOriginForDecrypt.localStorage,
+      state.cookies,
+    );
   }
 
   // Extract MSAL cache info with diagnostics
