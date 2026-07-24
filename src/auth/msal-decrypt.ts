@@ -146,11 +146,17 @@ export function resolveMsalLocalStorage(
       continue;
     }
 
+    // When we cannot decrypt, pass the original encrypted entry through
+    // untouched. Callers persist the resolved list back to session-state.json,
+    // so dropping entries would permanently lose the MSAL cache. Downstream
+    // extractors simply ignore entries without a plaintext secret/target.
     if (!encryption) {
+      resolved.push(item);
       decryptFailures++;
       continue;
     }
     if (entry.id !== encryption.id) {
+      resolved.push(item);
       skippedExpired++;
       continue;
     }
@@ -169,6 +175,7 @@ export function resolveMsalLocalStorage(
       resolved.push({ name: key, value: JSON.stringify(decrypted) });
       decryptedCount++;
     } catch (err) {
+      resolved.push(item);
       decryptFailures++;
       log.debug(
         'msal-decrypt',

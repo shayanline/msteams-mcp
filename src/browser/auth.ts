@@ -414,9 +414,13 @@ const TOKEN_REFRESH_POLL_INTERVAL_MS = 1000;
  * Waits for MSAL to refresh tokens in the browser.
  *
  * When the browser is "authenticated" (session cookies valid) but MSAL tokens
- * are expired/encrypted, we wait for Teams JS to acquire tokens, then save
- * session state and extract via the same decrypting path used by API tools.
- * (In-page localStorage values are MSAL-v4 encrypted, so plaintext scans fail.)
+ * are expired/encrypted, we wait for Teams JS to acquire tokens, then extract
+ * via the same decrypting path used by API tools. (In-page localStorage values
+ * are MSAL-v4 encrypted, so plaintext scans fail.)
+ *
+ * Polling reads the context storage state in memory. We only persist to disk
+ * once a valid token appears, to avoid writing and encrypting session state on
+ * every poll iteration.
  *
  * @returns true if tokens were refreshed, false if timeout
  */
@@ -431,9 +435,10 @@ async function waitForTokenRefresh(
   const startTime = Date.now();
 
   while (Date.now() - startTime < TOKEN_REFRESH_WAIT_TIMEOUT_MS) {
-    await saveSessionState(context);
-    const token = extractSubstrateToken();
+    const state = await context.storageState();
+    const token = extractSubstrateToken(state);
     if (token && token.expiry.getTime() > Date.now()) {
+      await saveSessionState(context);
       const minsRemaining = Math.round((token.expiry.getTime() - Date.now()) / 60000);
       log(`Token refresh detected (${minsRemaining} mins valid).`);
       return true;

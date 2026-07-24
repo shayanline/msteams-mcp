@@ -101,7 +101,7 @@ describe('resolveMsalLocalStorage', () => {
     expect(JSON.parse(resolved[2].value).secret).toBe('eyJplain');
   });
 
-  it('skips encrypted entries when cookie key id does not match', () => {
+  it('passes encrypted entries through unchanged when cookie key id does not match', () => {
     const baseKey = randomBytes(32);
     const storageKey = `msal.2|x|accesstoken|${TEAMS_CLIENT_ID}|t|scope|`;
     const encrypted = encryptMsalEntry(
@@ -110,13 +110,50 @@ describe('resolveMsalLocalStorage', () => {
       'current-id',
       storageKey,
     );
+    const item = { name: storageKey, value: JSON.stringify(encrypted) };
     const resolved = resolveMsalLocalStorage(
-      [{ name: storageKey, value: JSON.stringify(encrypted) }],
+      [item],
       [{
         name: 'msal.cache.encryption',
         value: encodeURIComponent(JSON.stringify({ id: 'other-id', key: base64Url(baseKey) })),
       }],
     );
-    expect(resolved).toEqual([]);
+    expect(resolved).toEqual([item]);
+  });
+
+  it('passes encrypted entries through unchanged when the encryption cookie is missing', () => {
+    const baseKey = randomBytes(32);
+    const storageKey = `msal.2|x|accesstoken|${TEAMS_CLIENT_ID}|t|scope|`;
+    const encrypted = encryptMsalEntry(
+      { secret: 'eyJ', target: 'scope' },
+      baseKey,
+      'current-id',
+      storageKey,
+    );
+    const item = { name: storageKey, value: JSON.stringify(encrypted) };
+    expect(resolveMsalLocalStorage([item], undefined)).toEqual([item]);
+    expect(resolveMsalLocalStorage([item], [])).toEqual([item]);
+  });
+
+  it('passes encrypted entries through unchanged when decryption fails', () => {
+    const baseKey = randomBytes(32);
+    const keyId = 'enc-1';
+    const storageKey = `msal.2|x|accesstoken|${TEAMS_CLIENT_ID}|t|scope|`;
+    const encrypted = encryptMsalEntry(
+      { secret: 'eyJ', target: 'scope' },
+      baseKey,
+      keyId,
+      storageKey,
+    );
+    const item = { name: storageKey, value: JSON.stringify(encrypted) };
+    // Matching key id but wrong key material -> auth tag verification fails.
+    const resolved = resolveMsalLocalStorage(
+      [item],
+      [{
+        name: 'msal.cache.encryption',
+        value: encodeURIComponent(JSON.stringify({ id: keyId, key: base64Url(randomBytes(32)) })),
+      }],
+    );
+    expect(resolved).toEqual([item]);
   });
 });
