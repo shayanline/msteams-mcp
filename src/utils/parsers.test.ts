@@ -768,8 +768,10 @@ describe('markdownToTeamsHtml', () => {
     expect(markdownToTeamsHtml('Line 1\nLine 2')).toBe('<p>Line 1<br>Line 2</p>');
   });
 
-  it('converts double newlines to separate paragraphs', () => {
-    expect(markdownToTeamsHtml('Para 1\n\nPara 2')).toBe('<p>Para 1</p><p>Para 2</p>');
+  it('renders a blank line between paragraphs as a visible gap (br br)', () => {
+    // Teams collapses the margin between adjacent <p> tags, so a blank line must
+    // become <br><br> inside one <p> to actually show a gap rather than cramping.
+    expect(markdownToTeamsHtml('Para 1\n\nPara 2')).toBe('<p>Para 1<br><br>Para 2</p>');
   });
 
   it('converts unordered lists', () => {
@@ -803,8 +805,10 @@ describe('markdownToTeamsHtml', () => {
 
   it('handles complex multi-paragraph message', () => {
     const input = 'Hello **team**!\n\nHere are the updates:\n\n- Item 1\n- Item 2\n\nThanks!';
+    // Blank-line-separated paragraphs are stitched with <br><br> for a visible
+    // gap; a block element (the list) still breaks out into its own <ul>.
     expect(markdownToTeamsHtml(input)).toBe(
-      '<p>Hello <b>team</b>!</p><p>Here are the updates:</p><ul><li>Item 1</li><li>Item 2</li></ul><p>Thanks!</p>'
+      '<p>Hello <b>team</b>!<br><br>Here are the updates:</p><ul><li>Item 1</li><li>Item 2</li></ul><p>Thanks!</p>'
     );
   });
 
@@ -926,10 +930,11 @@ describe('markdownToTeamsHtml', () => {
       '**Target**',
       'First paying customer within four months.',
     ].join('\n');
+    // Each bold heading stays tight above its own content (no blank line there),
+    // while the blank line between the two sections becomes a <br><br> gap.
     expect(markdownToTeamsHtml(input)).toBe(
       '<p><b>Why we are building this</b></p>' +
-      '<p>The core gap is phone call data.</p>' +
-      '<p><b>Target</b></p>' +
+      '<p>The core gap is phone call data.<br><br><b>Target</b></p>' +
       '<p>First paying customer within four months.</p>'
     );
   });

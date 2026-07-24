@@ -184,13 +184,13 @@ export const MuteChatInputSchema = z.object({
 
 const sendMessageToolDefinition: Tool = {
   name: 'teams_send_message',
-  description: 'Send a message to a Teams conversation. Use markdown for formatting (not HTML): **bold**, *italic*, ~~strikethrough~~, `code`, ```code blocks```, lists, and newlines. Supports @mentions: people with @[Name](mri) (MRI from teams_search_people) and channel tags with @[TagName](tag:tagId) (IDs from teams_get_tags). Defaults to self-notes (48:notes). For channel thread replies, provide replyToMessageId.',
+  description: 'Send a message to a Teams conversation. Use plain markdown (not HTML): **bold**, *italic*, ~~strikethrough~~, `code`, ```code blocks```, lists, headings, tables, blockquotes. For spacing, just write normal markdown: a blank line between paragraphs renders as a visible gap and a single newline is a line break (no special escaping or trailing-space tricks needed). Supports @mentions: people with @[Name](mri) (MRI from teams_search_people) and channel tags with @[TagName](tag:tagId) (IDs from teams_get_tags). Defaults to self-notes (48:notes). For channel thread replies, provide replyToMessageId.',
   inputSchema: {
     type: 'object',
     properties: {
       content: {
         type: 'string',
-        description: 'The message content in markdown (not HTML). Supports: **bold**, *italic*, ~~strikethrough~~, `inline code`, ```code blocks```, bullet lists (- item), numbered lists (1. item), and newlines. Do NOT send raw HTML tags. For people @mentions use @[DisplayName](mri) (MRI from teams_search_people). For channel tag @mentions use @[DisplayName](tag:tagId) (tag IDs from teams_get_tags). Markdown links [text](url) are supported.',
+        description: 'The message content in markdown (not HTML). Supports: **bold**, *italic*, ~~strikethrough~~, `inline code`, ```code blocks```, bullet lists (- item), numbered lists (1. item), headings, pipe tables and blockquotes. Spacing works like normal markdown: a blank line between blocks becomes a visible paragraph gap, a single newline is a line break. Just write it naturally; do not add trailing-space hard breaks or raw HTML tags. For people @mentions use @[DisplayName](mri) (MRI from teams_search_people). For channel tag @mentions use @[DisplayName](tag:tagId) (tag IDs from teams_get_tags). Markdown links [text](url) are supported.',
       },
       conversationId: {
         type: 'string',
@@ -337,7 +337,7 @@ const createGroupChatToolDefinition: Tool = {
 
 const editMessageToolDefinition: Tool = {
   name: 'teams_edit_message',
-  description: 'Edit one of your own messages (same markdown and @mention rules as teams_send_message: people @[Name](mri), channel tags @[TagName](tag:tagId) from teams_get_tags). You can only edit messages you sent.',
+  description: 'Edit one of your own messages (same markdown and @mention rules as teams_send_message: people @[Name](mri), channel tags @[TagName](tag:tagId) from teams_get_tags). You can only edit messages you sent. WARNING: editing replaces the message body and DROPS any file attachments on it. To change a message that has a file, delete it (teams_delete_message) and re-send with teams_send_file instead of editing.',
   inputSchema: {
     type: 'object',
     properties: {

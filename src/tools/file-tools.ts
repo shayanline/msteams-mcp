@@ -139,7 +139,7 @@ const sendFileToolDefinition: Tool = {
     properties: {
       conversationId: { type: 'string', description: 'The conversation to send the file to (1:1, group, meeting, self chat, or channel).' },
       localPath: { type: 'string', description: 'Absolute path to the local file to send.' },
-      caption: { type: 'string', description: 'Optional message text to send with the file.' },
+      caption: { type: 'string', description: 'Optional message text to send with the file. Same markdown as teams_send_message: a blank line between paragraphs renders as a visible gap, a single newline is a line break.' },
     },
     required: ['conversationId', 'localPath'],
   },
@@ -153,7 +153,7 @@ const sendFilesToolDefinition: Tool = {
     properties: {
       conversationId: { type: 'string', description: 'The conversation to send the files to (1:1, group, meeting, self chat, or channel).' },
       localPaths: { type: 'array', items: { type: 'string' }, description: 'Absolute paths to the local files to attach to the one message (at least one).' },
-      caption: { type: 'string', description: 'Optional message text to send with the files.' },
+      caption: { type: 'string', description: 'Optional message text to send with the files. Same markdown as teams_send_message: a blank line between paragraphs renders as a visible gap, a single newline is a line break.' },
     },
     required: ['conversationId', 'localPaths'],
   },
