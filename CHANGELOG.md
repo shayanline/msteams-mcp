@@ -10,6 +10,7 @@ All notable changes to this project are documented here. The format is based on
 - `teams_send_file` / `teams_send_files`: when the target file name is briefly locked (HTTP 423, for example a same-named file was just deleted or is still syncing, in either OneDrive for chats or a channel's SharePoint library), the upload now retries automatically under a de-duplicated name (`report (2).xlsx`, up to three variants) instead of failing the send. Failures other than a lock are surfaced immediately, and if every variant is locked the error is retryable and explains how to recover. Read the final name from the returned item.
 
 ### Fixed
+- Markdown to Teams HTML: a blank line between paragraphs now renders as a visible gap. Teams' `RichText/Html` chat renderer collapses the margin between adjacent `<p>` elements, so paragraph-to-paragraph breaks are now emitted as `<br><br>` inside a single `<p>`. Genuine block elements (lists, tables, headings, code, blockquotes) keep their own boundaries, and a heading sitting directly above its content stays tight.
 - Login / token extraction against MSAL Browser v4 encrypted `localStorage` cache: decrypt entries using the `msal.cache.encryption` session cookie (AES-GCM + HKDF), matching `@azure/msal-browser`. Without this, Substrate search and HTTP token refresh could fail after a successful login while messaging cookies still worked.
 
 ## [0.29.2] - 2026-07-01
