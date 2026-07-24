@@ -133,7 +133,7 @@ const downloadSharedFileToolDefinition: Tool = {
 
 const sendFileToolDefinition: Tool = {
   name: 'teams_send_file',
-  description: 'Send a local file into a Teams conversation as a native file attachment. This is the correct way to share a file: it posts a real file chiclet (icon, preview, open in Teams) that also appears in the conversation\'s Files tab, not just a link. The file is uploaded to the right place automatically: a channel\'s own SharePoint files folder for channels, or your OneDrive "Microsoft Teams Chat Files" (shared via an org link) for 1:1, group, meeting and self chats. Works for all conversation types. Add an optional caption as the message text. Confirm the content with the user before sending.',
+  description: 'Send a local file into a Teams conversation as a native file attachment. This is the correct way to share a file: it posts a real file chiclet (icon, preview, open in Teams) that also appears in the conversation\'s Files tab, not just a link. The file is uploaded to the right place automatically: a channel\'s own SharePoint files folder for channels, or your OneDrive "Microsoft Teams Chat Files" (shared via an org link) for 1:1, group, meeting and self chats. Works for all conversation types. Add an optional caption as the message text. If a same-named file is briefly locked in OneDrive (e.g. just re-sent), it is retried automatically under a de-duplicated name, so check the returned fileName. Confirm the content with the user before sending.',
   inputSchema: {
     type: 'object',
     properties: {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ok } from '../types/result.js';
+import { ok, err } from '../types/result.js';
+import { ErrorCode, createError } from '../types/errors.js';
 
 vi.mock('../utils/http.js', () => ({ httpRequest: vi.fn() }));
 vi.mock('../utils/auth-guards.js', () => ({ requireGraphAuth: vi.fn() }));
@@ -25,6 +26,7 @@ const shareInfoResponse = (webUrl: string) => httpOk({
   sharepointIds: { listItemUniqueId: 'LIU-GUID', siteId: 'SITE-GUID' },
 });
 const httpOk = (data: unknown) => ok({ status: 200, headers: new Headers(), data } as never);
+const httpErr = (message: string) => err(createError(ErrorCode.UNKNOWN, message)) as never;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -72,6 +74,39 @@ describe('uploadFile', () => {
     const res = await uploadFile('/tmp/missing.txt');
     expect(res.ok).toBe(false);
     expect(mockHttp).not.toHaveBeenCalled();
+  });
+
+  it('retries under a de-duplicated name when the target is locked (HTTP 423)', async () => {
+    mockRead.mockResolvedValueOnce(Buffer.from('hello'));
+    mockHttp
+      .mockResolvedValueOnce(httpErr('HTTP 423: {"error":{"code":"resourceLocked"}}')) // original locked
+      .mockResolvedValueOnce(httpOk({ id: '01Y', name: 'note (2).txt' }));              // retry succeeds
+    const res = await uploadFile('/tmp/note.txt', 'MyFolder');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value).toMatchObject({ id: '01Y', name: 'note (2).txt' });
+    expect(mockHttp).toHaveBeenCalledTimes(2);
+    expect(mockHttp.mock.calls[0][0]).toContain('/MyFolder/note.txt:/content');
+    expect(mockHttp.mock.calls[1][0]).toContain('/MyFolder/note%20(2).txt:/content');
+  });
+
+  it('returns a retryable, well-signposted error when every name variant is locked', async () => {
+    mockRead.mockResolvedValueOnce(Buffer.from('hello'));
+    mockHttp.mockResolvedValue(httpErr('HTTP 423: resourceLocked'));
+    const res = await uploadFile('/tmp/note.txt', 'MyFolder');
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(mockHttp).toHaveBeenCalledTimes(4); // original + 3 fallbacks
+    expect(res.error.retryable).toBe(true);
+    expect(res.error.suggestions.join(' ').toLowerCase()).toContain('lock');
+  });
+
+  it('surfaces a non-lock upload failure immediately without renaming', async () => {
+    mockRead.mockResolvedValueOnce(Buffer.from('hello'));
+    mockHttp.mockResolvedValueOnce(httpErr('HTTP 403: Forbidden'));
+    const res = await uploadFile('/tmp/note.txt', 'MyFolder');
+    expect(res.ok).toBe(false);
+    expect(mockHttp).toHaveBeenCalledTimes(1);
   });
 });
 

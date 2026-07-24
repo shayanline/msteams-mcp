@@ -11,12 +11,33 @@ import { basename } from 'node:path';
 import { httpRequest } from '../utils/http.js';
 import { GRAPH_BASE_URL } from '../utils/api-config.js';
 import { type Result, ok, err } from '../types/result.js';
-import { ErrorCode, createError } from '../types/errors.js';
+import { ErrorCode, createError, type McpError } from '../types/errors.js';
 import { requireGraphAuth } from '../utils/auth-guards.js';
 import { sendMessage, getChannelFilesInfo } from './chatsvc-messaging.js';
 import { getConversationType } from '../utils/parsers.js';
 
 const GRAPH_UPLOAD_MAX = 250 * 1024 * 1024; // simple upload supports up to 250 MB
+const UPLOAD_LOCK_RETRIES = 3; // fallback name variants tried when the target item is locked
+
+/**
+ * True when a Graph error is a OneDrive "resource locked" failure (HTTP 423),
+ * which happens when the target file name was just deleted or is still syncing.
+ */
+function isResourceLocked(error: McpError): boolean {
+  const m = (error.message ?? '').toLowerCase();
+  return m.includes('423') || m.includes('resourcelocked') || m.includes('locked');
+}
+
+/**
+ * Builds de-duplicated file name variants ("report (2).xlsx", "report (3).xlsx",
+ * ...) used to retry an upload when the original name is locked.
+ */
+function dedupeNames(name: string, count: number): string[] {
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  return Array.from({ length: count }, (_, i) => `${stem} (${i + 2})${ext}`);
+}
 
 export interface DriveItem {
   id: string;
@@ -72,14 +93,38 @@ export async function uploadFile(localPath: string, folder = 'Apps/AutomationUpl
     return err(createError(ErrorCode.INVALID_INPUT, 'File exceeds the 250 MB upload limit.'));
   }
 
-  const name = basename(localPath);
-  const drivePath = `${folder}/${name}`.split('/').map(encodeURIComponent).join('/');
-  const response = await httpRequest<Record<string, unknown>>(
-    `${GRAPH_BASE_URL}/me/drive/root:/${drivePath}:/content`,
-    { method: 'PUT', headers: { ...bearer(auth.value), 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(data) }
-  );
-  if (!response.ok) return response;
-  return ok(parseItem(response.value.data));
+  // Upload under the original name. If OneDrive reports the target item is locked
+  // (HTTP 423 resourceLocked, which happens when a same-named file was just deleted
+  // or is still syncing), retry under a de-duplicated name so the send still succeeds
+  // instead of hard-failing. Callers read the final name from the returned item.
+  const original = basename(localPath);
+  const candidates = [original, ...dedupeNames(original, UPLOAD_LOCK_RETRIES)];
+
+  let lastError: McpError | undefined;
+  for (const name of candidates) {
+    const drivePath = `${folder}/${name}`.split('/').map(encodeURIComponent).join('/');
+    const response = await httpRequest<Record<string, unknown>>(
+      `${GRAPH_BASE_URL}/me/drive/root:/${drivePath}:/content`,
+      { method: 'PUT', headers: { ...bearer(auth.value), 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(data) }
+    );
+    if (response.ok) return ok(parseItem(response.value.data));
+    // A failure other than a lock (auth, size, network, ...) will not be fixed by
+    // renaming, so surface it immediately rather than burning through variants.
+    if (!isResourceLocked(response.error)) return response;
+    lastError = response.error;
+  }
+
+  return err(createError(
+    ErrorCode.UNKNOWN,
+    `OneDrive upload failed: "${original}" and ${UPLOAD_LOCK_RETRIES} fallback name(s) are all locked (HTTP 423). ${lastError?.message ?? ''}`.trim(),
+    {
+      retryable: true,
+      suggestions: [
+        'Wait about a minute for OneDrive to release the lock, then retry.',
+        'Or send the file under a different name.',
+      ],
+    }
+  ));
 }
 
 /** Downloads a OneDrive file (by item id) to a local path. */
