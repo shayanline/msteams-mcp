@@ -256,15 +256,24 @@ describe('sendFileToChat (channel conversations)', () => {
       .mockResolvedValueOnce(httpOk({ id: 'folder', parentReference: { driveId: 'drv' } }))          // getChannelFilesFolder
       .mockResolvedValueOnce(httpErr('HTTP 423: {"error":{"code":"resourceLocked"}}'))               // upload PUT (locked)
       .mockResolvedValueOnce(httpOk({ id: 'item1', name: 'report (2).pdf', webUrl: 'x' }))            // retry PUT succeeds
-      .mockResolvedValueOnce(shareInfoResponse('https://t.sharepoint.com/teams/X/Shared%20Documents/Chan/report.pdf')); // getShareFileInfo
+      .mockResolvedValueOnce(httpOk({                                                                 // getShareFileInfo (reflects the renamed file)
+        id: 'item1', name: 'report (2).pdf',
+        webUrl: 'https://t.sharepoint.com/teams/X/Shared%20Documents/Chan/report%20(2).pdf',
+        sharepointIds: { listItemUniqueId: 'LIU-GUID', siteId: 'SITE-GUID' },
+      }));
     mockSend.mockResolvedValueOnce(ok({ messageId: 'm', timestamp: 1 }) as never);
 
     const res = await sendFileToChat('19:abc@thread.tacv2', '/tmp/report.pdf', 'cap');
     expect(res.ok).toBe(true);
+    if (!res.ok) return;
     // folder lookup + locked PUT + retry PUT + share-info = 4 calls.
     expect(mockHttp).toHaveBeenCalledTimes(4);
     expect(mockHttp.mock.calls[1][0]).toContain('/drives/drv/items/folder:/report.pdf:/content');
     expect(mockHttp.mock.calls[2][0]).toContain('/drives/drv/items/folder:/report%20(2).pdf:/content');
+    // The de-duplicated name propagates to the returned result and the chiclet.
+    expect(res.value.fileName).toBe('report (2).pdf');
+    const [, , options] = mockSend.mock.calls[0] as [string, string, { files?: Record<string, unknown>[] }];
+    expect(options.files![0]).toMatchObject({ title: 'report (2).pdf', fileName: 'report (2).pdf' });
   });
 
   it('returns the channel-info error when the team cannot be resolved', async () => {

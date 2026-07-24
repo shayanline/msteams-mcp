@@ -99,12 +99,15 @@ async function putContentWithLockRetry(
 ): Promise<Result<DriveItem>> {
   const candidates = [originalName, ...dedupeNames(originalName, UPLOAD_LOCK_RETRIES)];
   const headers = { ...bearer(token), 'Content-Type': 'application/octet-stream' };
+  // Build the request body once and reuse it across attempts, so retrying does
+  // not re-copy the whole file (up to 250 MB) on every candidate name.
+  const body = new Uint8Array(data);
 
   let lastError: McpError | undefined;
   for (const name of candidates) {
     const response = await httpRequest<Record<string, unknown>>(
       buildUrl(name),
-      { method: 'PUT', headers, body: new Uint8Array(data) }
+      { method: 'PUT', headers, body }
     );
     if (response.ok) return ok(parseItem(response.value.data));
     // A failure other than a lock (auth, size, network, ...) will not be fixed by

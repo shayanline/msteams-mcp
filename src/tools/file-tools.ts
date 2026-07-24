@@ -147,7 +147,7 @@ const sendFileToolDefinition: Tool = {
 
 const sendFilesToolDefinition: Tool = {
   name: 'teams_send_files',
-  description: 'Send several local files into a Teams conversation as native attachments on a SINGLE message (one message, multiple file chiclets), with an optional caption as the message text. Use this instead of calling teams_send_file repeatedly when you want all files grouped under one message rather than one message per file. Each file becomes a real file chiclet that also appears in the conversation\'s Files tab. Files are uploaded to the right place automatically (a channel\'s SharePoint files folder for channels, or your OneDrive "Microsoft Teams Chat Files" for chats). Confirm the content with the user before sending.',
+  description: 'Send several local files into a Teams conversation as native attachments on a SINGLE message (one message, multiple file chiclets), with an optional caption as the message text. Use this instead of calling teams_send_file repeatedly when you want all files grouped under one message rather than one message per file. Each file becomes a real file chiclet that also appears in the conversation\'s Files tab. Files are uploaded to the right place automatically (a channel\'s SharePoint files folder for channels, or your OneDrive "Microsoft Teams Chat Files" for chats). If a same-named file is briefly locked in storage (e.g. just re-sent), it is retried automatically under a de-duplicated name, so check the returned fileName for each file. Confirm the content with the user before sending.',
   inputSchema: {
     type: 'object',
     properties: {
