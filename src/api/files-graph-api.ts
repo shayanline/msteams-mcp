@@ -22,10 +22,15 @@ const UPLOAD_LOCK_RETRIES = 3; // fallback name variants tried when the target i
 /**
  * True when a Graph error is a OneDrive "resource locked" failure (HTTP 423),
  * which happens when the target file name was just deleted or is still syncing.
+ *
+ * Matches the HTTP 423 status (messages are formatted `HTTP <status>: <body>`)
+ * or the `resourceLocked` error code. Deliberately avoids matching a bare "423"
+ * or "locked" substring, which could appear in an unrelated body (for example a
+ * 403 "account is locked") and trigger pointless rename retries.
  */
 function isResourceLocked(error: McpError): boolean {
   const m = (error.message ?? '').toLowerCase();
-  return m.includes('423') || m.includes('resourcelocked') || m.includes('locked');
+  return m.includes('http 423') || m.includes('resourcelocked');
 }
 
 /**

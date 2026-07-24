@@ -108,6 +108,14 @@ describe('uploadFile', () => {
     expect(res.ok).toBe(false);
     expect(mockHttp).toHaveBeenCalledTimes(1);
   });
+
+  it('does not treat a non-423 error that merely mentions a lock as retryable', async () => {
+    mockRead.mockResolvedValueOnce(Buffer.from('hello'));
+    mockHttp.mockResolvedValueOnce(httpErr('HTTP 403: your account is locked'));
+    const res = await uploadFile('/tmp/note.txt', 'MyFolder');
+    expect(res.ok).toBe(false);
+    expect(mockHttp).toHaveBeenCalledTimes(1); // surfaced immediately, no rename retries
+  });
 });
 
 describe('downloadFile', () => {
