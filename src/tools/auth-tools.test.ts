@@ -70,6 +70,8 @@ beforeEach(() => {
   vi.mocked(createBrowserContext).mockResolvedValue(makeManager());
   vi.mocked(ensureAuthenticated).mockResolvedValue(undefined as never);
   vi.mocked(forceNewLogin).mockResolvedValue(undefined as never);
+  vi.mocked(getSubstrateTokenStatus).mockReturnValue({ hasToken: true, minutesRemaining: 30 } as never);
+  vi.mocked(getMessageAuthStatus).mockReturnValue({ hasToken: true, minutesRemaining: 30 } as never);
 });
 
 describe('LoginInputSchema', () => {
@@ -90,6 +92,16 @@ describe('loginTool', () => {
     expect(createBrowserContext).not.toHaveBeenCalled();
   });
 
+  it('refreshes when messaging authentication is unavailable', async () => {
+    vi.mocked(getMessageAuthStatus)
+      .mockReturnValueOnce({ hasToken: false } as never)
+      .mockReturnValue({ hasToken: true, minutesRemaining: 30 } as never);
+    const ctx = makeServer();
+    const res = await loginTool.handler({ forceNew: false }, ctx);
+    expect(res.success).toBe(true);
+    expect(createBrowserContext).toHaveBeenCalled();
+  });
+
   it('returns early-skip when token below threshold then succeeds headless', async () => {
     vi.mocked(getSubstrateTokenStatus).mockReturnValue({
       hasToken: true, minutesRemaining: 2, expiresAt: 'soon',
@@ -100,9 +112,19 @@ describe('loginTool', () => {
     if (res.success) expect(String(res.data.message)).toContain('silently via SSO');
   });
 
+  it('rejects a completed login when required tokens are still unavailable', async () => {
+    vi.mocked(getSubstrateTokenStatus).mockReturnValueOnce({ hasToken: false } as never);
+    vi.mocked(getMessageAuthStatus).mockReturnValue({ hasToken: false } as never);
+    vi.mocked(ensureAuthenticated)
+      .mockRejectedValueOnce(new Error('needs interaction'))
+      .mockResolvedValueOnce(undefined as never);
+    const ctx = makeServer();
+    await expect(loginTool.handler({ forceNew: false }, ctx)).rejects.toThrow('did not produce usable tokens');
+  });
+
   it('closes existing browser then succeeds via headless SSO', async () => {
     const existing = makeManager();
-    vi.mocked(getSubstrateTokenStatus).mockReturnValue({ hasToken: false } as never);
+    vi.mocked(getSubstrateTokenStatus).mockReturnValueOnce({ hasToken: false } as never);
     const ctx = makeServer({ getBrowserManager: vi.fn().mockReturnValue(existing) });
     const res = await loginTool.handler({ forceNew: false }, ctx);
     expect(res.success).toBe(true);
@@ -111,7 +133,6 @@ describe('loginTool', () => {
   });
 
   it('forceNew: clears state, headless fails, falls back to visible forceNewLogin', async () => {
-    vi.mocked(getSubstrateTokenStatus).mockReturnValue({ hasToken: false } as never);
     // headless attempt rejects, cleanup closeBrowser rejects (covers inner catch),
     // then visible browser closeBrowser resolves.
     vi.mocked(ensureAuthenticated).mockRejectedValueOnce(new Error('needs interaction'));
@@ -126,7 +147,7 @@ describe('loginTool', () => {
   });
 
   it('non-forceNew: headless fails, falls back to visible ensureAuthenticated', async () => {
-    vi.mocked(getSubstrateTokenStatus).mockReturnValue({ hasToken: false } as never);
+    vi.mocked(getSubstrateTokenStatus).mockReturnValueOnce({ hasToken: false } as never);
     vi.mocked(ensureAuthenticated)
       .mockRejectedValueOnce(new Error('needs interaction'))
       .mockResolvedValueOnce(undefined as never);
@@ -181,7 +202,7 @@ describe('statusTool', () => {
 
 describe('loginTool - log callbacks and error shapes', () => {
   it('invokes the headless progress callback during silent SSO', async () => {
-    vi.mocked(getSubstrateTokenStatus).mockReturnValue({ hasToken: false } as never);
+    vi.mocked(getSubstrateTokenStatus).mockReturnValueOnce({ hasToken: false } as never);
     vi.mocked(ensureAuthenticated).mockImplementationOnce(
       async (_page, _ctx, logCb) => {
         (logCb as (m: string) => void)?.('headless progress');
@@ -194,7 +215,7 @@ describe('loginTool - log callbacks and error shapes', () => {
   });
 
   it('invokes the visible login callback when falling back (non-forceNew)', async () => {
-    vi.mocked(getSubstrateTokenStatus).mockReturnValue({ hasToken: false } as never);
+    vi.mocked(getSubstrateTokenStatus).mockReturnValueOnce({ hasToken: false } as never);
     vi.mocked(ensureAuthenticated)
       .mockRejectedValueOnce(new Error('needs interaction'))
       .mockImplementationOnce(async (_page, _ctx, logCb) => {
@@ -207,7 +228,6 @@ describe('loginTool - log callbacks and error shapes', () => {
   });
 
   it('invokes the forceNewLogin callback when forcing a fresh login', async () => {
-    vi.mocked(getSubstrateTokenStatus).mockReturnValue({ hasToken: false } as never);
     vi.mocked(ensureAuthenticated).mockRejectedValueOnce(new Error('needs interaction'));
     vi.mocked(forceNewLogin).mockImplementationOnce(
       async (_page, _ctx, logCb) => {
@@ -221,7 +241,7 @@ describe('loginTool - log callbacks and error shapes', () => {
   });
 
   it('handles a non-Error thrown by the headless attempt', async () => {
-    vi.mocked(getSubstrateTokenStatus).mockReturnValue({ hasToken: false } as never);
+    vi.mocked(getSubstrateTokenStatus).mockReturnValueOnce({ hasToken: false } as never);
     // Reject with a non-Error value to exercise the String(error) branch.
     vi.mocked(ensureAuthenticated).mockRejectedValueOnce('string failure');
     const ctx = makeServer();

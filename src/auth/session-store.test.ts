@@ -333,6 +333,13 @@ describe('getTeamsOrigin', () => {
     expect(store.getTeamsOrigin({ cookies: [], origins: [origin] } as never)).toBe(origin);
   });
 
+  it('prefers the current Teams origin over stale classic state', async () => {
+    const store = await loadStore();
+    const classic = { origin: 'https://teams.microsoft.com', localStorage: [] };
+    const current = { origin: 'https://teams.cloud.microsoft', localStorage: [] };
+    expect(store.getTeamsOrigin({ cookies: [], origins: [classic, current] } as never)).toBe(current);
+  });
+
   it('finds a government cloud origin', async () => {
     const store = await loadStore();
     const origin = { origin: 'https://dod.teams.microsoft.us', localStorage: [] };

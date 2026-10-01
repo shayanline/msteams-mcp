@@ -581,6 +581,30 @@ describe('extractMessageAuth', () => {
     expect(extractMessageAuth(state)?.userMri).toBe('live:somebody');
   });
 
+  it('extracts split cookies from current Teams service domains', () => {
+    const skypeToken = makeJwt({ skypeid: 'orgid:cloud-user' });
+    const state: SessionState = {
+      origins: [],
+      cookies: [
+        { name: 'authtoken', value: 'authval', domain: 'teams.cloud.microsoft' },
+        { name: 'skypetoken_asm', value: skypeToken, domain: '.asyncgw.teams.microsoft.com' },
+      ],
+    };
+    expect(extractMessageAuth(state)?.userMri).toBe('8:orgid:cloud-user');
+  });
+
+  it('ignores matching cookie names from unrelated domains', () => {
+    const skypeToken = makeJwt({ skypeid: 'orgid:untrusted' });
+    const state: SessionState = {
+      origins: [],
+      cookies: [
+        { name: 'skypetoken_asm', value: skypeToken, domain: 'example.com' },
+        { name: 'authtoken', value: 'authval', domain: 'example.com' },
+      ],
+    };
+    expect(extractMessageAuth(state)).toBeNull();
+  });
+
   it('returns null when required cookies are missing', () => {
     const state: SessionState = {
       origins: [],
@@ -629,19 +653,33 @@ describe('getMessageAuthStatus', () => {
     expect(getMessageAuthStatus()).toEqual({ hasToken: false });
   });
 
-  it('reports valid when cookie present but expiry unparseable', () => {
+  it('reports no token when the authentication cookie is missing', () => {
     vi.mocked(readSessionState).mockReturnValue({
       origins: [],
       cookies: [{ name: 'skypetoken_asm', value: 'opaque-token', domain: 'teams.microsoft.com' }],
     });
-    expect(getMessageAuthStatus()).toEqual({ hasToken: true });
+    expect(getMessageAuthStatus()).toEqual({ hasToken: false });
+  });
+
+  it('reports valid when complete authentication has unparseable expiry', () => {
+    vi.mocked(readSessionState).mockReturnValue({
+      origins: [],
+      cookies: [
+        { name: 'skypetoken_asm', value: makeJwt({ skypeid: 'orgid:user' }), domain: '.asm.skype.com' },
+        { name: 'authtoken', value: 'authval', domain: 'teams.cloud.microsoft' },
+      ],
+    });
+    expect(getMessageAuthStatus().hasToken).toBe(true);
   });
 
   it('reports expiry details when cookie is a JWT', () => {
-    const token = makeJwt({ exp: futureExp() });
+    const token = makeJwt({ exp: futureExp(), skypeid: 'orgid:user' });
     vi.mocked(readSessionState).mockReturnValue({
       origins: [],
-      cookies: [{ name: 'skypetoken_asm', value: token, domain: 'teams.microsoft.com' }],
+      cookies: [
+        { name: 'skypetoken_asm', value: token, domain: '.asm.skype.com' },
+        { name: 'authtoken', value: 'authval', domain: 'teams.cloud.microsoft' },
+      ],
     });
     const status = getMessageAuthStatus();
     expect(status.hasToken).toBe(true);

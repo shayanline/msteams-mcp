@@ -84,7 +84,9 @@ function isProcessRunning(pid: number): boolean {
  * @returns true if a stale lock was removed, false otherwise
  */
 function cleanupStaleSingletonLock(): boolean {
-  if (!fs.existsSync(SINGLETON_LOCK_PATH)) {
+  try {
+    fs.lstatSync(SINGLETON_LOCK_PATH);
+  } catch {
     return false;
   }
 
@@ -199,17 +201,12 @@ export async function createBrowserContext(
     // Check if this is a profile lock error and try to recover
     if (errorMessage.includes('ProcessSingleton') || errorMessage.includes('SingletonLock')) {
       log.warn('browser', 'Profile lock detected, attempting to clean up and retry...');
-      
-      // Force remove the lock file and retry once
-      try {
-        if (fs.existsSync(SINGLETON_LOCK_PATH)) {
-          fs.unlinkSync(SINGLETON_LOCK_PATH);
-          log.info('browser', 'Removed SingletonLock file, retrying browser launch...');
-          return await launchBrowser();
-        }
-      } catch (cleanupError) {
-        log.error('browser', `Failed to clean up SingletonLock: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+
+      // Remove only a stale lock, then retry once
+      if (cleanupStaleSingletonLock()) {
+        return await launchBrowser();
       }
+      throw new Error('Could not launch the Teams login browser because another MCP process is using its profile. Close the existing Teams login window and try again.');
     }
 
     const browserName = channel === 'msedge' ? 'Microsoft Edge' : 'Google Chrome';

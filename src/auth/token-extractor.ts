@@ -596,12 +596,15 @@ export function extractMessageAuth(state?: SessionState): MessageAuthInfo | null
   const sessionState = state ?? readSessionState();
   if (!sessionState) return null;
 
-  const cookies = sessionState.cookies ?? [];
-  const teamsCookies = cookies.filter(c => c.domain?.includes('teams.microsoft.com'));
+  const cookies = (sessionState.cookies ?? []).filter(c =>
+    c.domain?.includes('teams.microsoft.com') ||
+    c.domain?.includes('teams.cloud.microsoft') ||
+    c.domain?.includes('asm.skype.com')
+  );
 
   // Extract the two required cookies
-  const skypeToken = teamsCookies.find(c => c.name === 'skypetoken_asm')?.value ?? null;
-  const rawAuthToken = teamsCookies.find(c => c.name === 'authtoken')?.value ?? null;
+  const skypeToken = cookies.find(c => c.name === 'skypetoken_asm')?.value ?? null;
+  const rawAuthToken = cookies.find(c => c.name === 'authtoken')?.value ?? null;
   
   if (!skypeToken || !rawAuthToken) return null;
 
@@ -641,16 +644,12 @@ export function getMessageAuthStatus(): {
     return { hasToken: false };
   }
 
-  const cookies = sessionState.cookies ?? [];
-  const skypeToken = cookies.find(
-    c => c.domain?.includes('teams.microsoft.com') && c.name === 'skypetoken_asm'
-  )?.value;
-
-  if (!skypeToken) {
+  const auth = extractMessageAuth(sessionState);
+  if (!auth) {
     return { hasToken: false };
   }
 
-  const expiry = getJwtExpiry(skypeToken);
+  const expiry = getJwtExpiry(auth.skypeToken);
   if (!expiry) {
     // Token exists but can't parse expiry - assume valid
     return { hasToken: true };
