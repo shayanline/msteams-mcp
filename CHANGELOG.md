@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-10-01
+
+### Fixed
+- Teams authentication now prefers the current `teams.cloud.microsoft` session instead of stale classic Teams storage.
+- Messaging authentication now reads the split cookie layout used by the current Teams client and verifies both required token families before reporting a successful login.
+- Login now recognises the current Teams web application and removes stale Chrome profile locks without deleting locks held by active processes.
+
 ## [0.30.0] - 2026-07-24
 
 ### Added
@@ -88,7 +95,8 @@ All notable changes to this project are documented here. The format is based on
 
 See the [GitHub releases](https://github.com/shayanline/msteams-mcp/releases) for the history before independent maintenance began.
 
-[Unreleased]: https://github.com/shayanline/msteams-mcp/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/shayanline/msteams-mcp/compare/v0.30.1...HEAD
+[0.30.1]: https://github.com/shayanline/msteams-mcp/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/shayanline/msteams-mcp/compare/v0.29.2...v0.30.0
 [0.29.2]: https://github.com/shayanline/msteams-mcp/compare/v0.29.1...v0.29.2
 [0.29.1]: https://github.com/shayanline/msteams-mcp/compare/v0.29.0...v0.29.1

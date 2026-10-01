@@ -258,10 +258,10 @@ export function clearTokenCache(): void {
  * Used to find the correct origin in session state.
  */
 const TEAMS_ORIGINS = [
-  'https://teams.microsoft.com',   // Commercial
+  'https://teams.cloud.microsoft', // Current commercial client
+  'https://teams.microsoft.com',   // Classic commercial client
   'https://teams.microsoft.us',    // GCC-High
   'https://dod.teams.microsoft.us', // DoD
-  'https://teams.cloud.microsoft', // New Teams URL
 ];
 
 /**

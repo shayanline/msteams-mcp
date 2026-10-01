@@ -63,6 +63,18 @@ const statusToolDefinition: Tool = {
 /** Minimum minutes remaining on token to consider it valid (skip browser). */
 const TOKEN_VALID_THRESHOLD_MINUTES = 10;
 
+function isTokenUsable(status: { hasToken: boolean; minutesRemaining?: number }): boolean {
+  return status.hasToken && (
+    status.minutesRemaining === undefined ||
+    status.minutesRemaining >= TOKEN_VALID_THRESHOLD_MINUTES
+  );
+}
+
+function hasRequiredTokens(): boolean {
+  clearTokenCache();
+  return getSubstrateTokenStatus().hasToken && getMessageAuthStatus().hasToken;
+}
+
 async function handleLogin(
   input: z.infer<typeof LoginInputSchema>,
   ctx: ToolContext
@@ -83,9 +95,8 @@ async function handleLogin(
   // This is more reliable than browser-based auth detection
   if (!input.forceNew) {
     const tokenStatus = getSubstrateTokenStatus();
-    if (tokenStatus.hasToken && 
-        tokenStatus.minutesRemaining !== undefined && 
-        tokenStatus.minutesRemaining >= TOKEN_VALID_THRESHOLD_MINUTES) {
+    const messageStatus = getMessageAuthStatus();
+    if (isTokenUsable(tokenStatus) && isTokenUsable(messageStatus)) {
       ctx.server.markInitialised();
       return {
         success: true,
@@ -121,6 +132,10 @@ async function handleLogin(
         false, // No overlay in headless
         true   // Headless mode - throw immediately if user interaction required
       );
+
+      if (!hasRequiredTokens()) {
+        throw new Error('Login completed but did not produce usable tokens');
+      }
 
       await closeBrowser(headlessManager, true);
       ctx.server.resetBrowserState();
@@ -166,6 +181,10 @@ async function handleLogin(
     // Close browser after login - we only need the saved session/tokens
     await closeBrowser(browserManager, true);
     ctx.server.resetBrowserState();
+  }
+
+  if (!hasRequiredTokens()) {
+    throw new Error('Login completed but did not produce usable tokens');
   }
 
   ctx.server.markInitialised();
